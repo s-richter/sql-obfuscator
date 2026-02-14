@@ -71,47 +71,47 @@ This checklist is derived from `initial_spec_v2.md`.
 
 ## 8. Identifier Safety and Output Correctness
 
-- [ ] Handle reserved keyword collisions
-- [ ] Bracket generated names when needed for syntactic safety
-- [ ] Keep syntactic validity under `tsql`
-- [ ] Verify output remains parseable after transformation
+- [x] Handle reserved keyword collisions
+- [x] Bracket generated names when needed for syntactic safety
+- [x] Keep syntactic validity under `tsql`
+- [x] Verify output remains parseable after transformation
 
 ## 9. Test Suite
 
 - [x] Add test harness (e.g., `pytest`)
-- [ ] Add positive tests:
-- [ ] Simple `SELECT`
-- [ ] `JOIN` with repeated column names
+- [x] Add positive tests:
+- [x] Simple `SELECT`
+- [x] `JOIN` with repeated column names
 - [x] CTE declaration + reference
-- [ ] Temp tables (`#` and `##`)
+- [x] Temp tables (`#` and `##`)
 - [x] `CREATE TABLE` + `INSERT`
-- [ ] Mixed bracket/case normalization
+- [x] Mixed bracket/case normalization
 - [x] Qualified names (`dbo.Users`, `u.UserId`)
-- [ ] Add `GO` batch tests:
+- [x] Add `GO` batch tests:
 - [x] Multiple batches
 - [x] Lowercase `go`
-- [ ] Non-standalone `GO` text
-- [ ] Add negative tests:
+- [x] Non-standalone `GO` text
+- [x] Add negative tests:
 - [x] Missing file
-- [ ] Parse error
-- [ ] Animal pool exhaustion behavior
-- [ ] Reserved keyword collision behavior
-- [ ] Add determinism tests:
+- [x] Parse error
+- [x] Animal pool exhaustion behavior
+- [x] Reserved keyword collision behavior
+- [x] Add determinism tests:
 - [x] Same seed => same output
-- [ ] Different seed => mapping differs
+- [x] Different seed => mapping differs
 - [x] Add assertions for exit codes and stderr/stdout behavior
 
 ## 10. Documentation
 
 - [x] Document CLI usage examples
-- [ ] Document configuration flags and defaults
-- [ ] Document known limitations
-- [ ] Document guarantee boundaries (syntactic validity, not semantic equivalence)
+- [x] Document configuration flags and defaults
+- [x] Document known limitations
+- [x] Document guarantee boundaries (syntactic validity, not semantic equivalence)
 
 ## 11. Final Validation
 
-- [ ] Run full test suite and ensure green
-- [ ] Run manual smoke test on multi-statement sample with `GO`
-- [ ] Verify no unintended alias/schema renaming occurs
-- [ ] Confirm deterministic output with fixed seed
-- [ ] Confirm failure modes return non-zero exit code
+- [x] Run full test suite and ensure green
+- [x] Run manual smoke test on multi-statement sample with `GO`
+- [x] Verify no unintended alias/schema renaming occurs
+- [x] Confirm deterministic output with fixed seed
+- [x] Confirm failure modes return non-zero exit code

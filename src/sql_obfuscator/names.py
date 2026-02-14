@@ -33,6 +33,19 @@ def _is_safe_identifier(value: str) -> bool:
     return value.lower() not in TSQL_RESERVED_KEYWORDS
 
 
+def bracket_if_needed(value: str) -> str:
+    """Bracket an identifier if it's not a safe bare identifier.
+
+    This ensures syntactic validity in T-SQL even if a name
+    is a reserved keyword or contains special characters.
+    """
+    if _is_safe_identifier(value):
+        return value
+    # Escape any brackets in the value by doubling them
+    escaped = value.replace("]", "]]")
+    return f"[{escaped}]"
+
+
 def _load_animals() -> list[str]:
     path = Path(__file__).with_name("identifier_replacements.txt")
     try:
@@ -51,7 +64,11 @@ ANIMALS = _load_animals()
 
 
 class AnimalNameProvider:
-    """Generates unique animal-based names."""
+    """Generates unique animal-based names.
+
+    All generated names are guaranteed to be safe T-SQL identifiers
+    (not reserved keywords and matching valid identifier syntax).
+    """
 
     def __init__(self, seed: int | None = None) -> None:
         self._rng = random.Random(seed)
@@ -63,6 +80,16 @@ class AnimalNameProvider:
         self._suffix_counter: dict[str, int] = {}
 
     def next_name(self) -> str:
+        """Generate next unique safe identifier name.
+
+        Returns:
+            A bare identifier string (not bracketed). Since all names
+            are pre-filtered for safety, bracketing is not needed.
+
+        Raises:
+            RuntimeError: If all animal names are exhausted and no
+                safe base is available for suffixed fallback.
+        """
         while self._available:
             candidate = self._available.pop()
             if not _is_safe_identifier(candidate):
