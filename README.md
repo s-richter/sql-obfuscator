@@ -1,20 +1,20 @@
-# SQL Identifier Obfuscator
+﻿# SQL Identifier Obfuscator
 
 Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, temp tables) in T-SQL scripts using an AST-based workflow.
 
 ## Features
 
-- **Deterministic obfuscation**: Same seed produces identical output for consistent results
-- **Batch processing**: Handles SQL scripts with `GO` statement separators
-- **Reserved keyword safety**: Generated names never collide with T-SQL keywords
-- **Syntactic preservation**: Output remains parseable T-SQL
-- **Comprehensive renaming**:
+- Deterministic obfuscation: same seed produces identical output
+- Batch processing: handles SQL scripts with standalone `GO` separators
+- Reserved keyword safety: generated names never collide with T-SQL keywords
+- Syntactic preservation: transformed output remains parseable T-SQL
+- Comprehensive renaming:
   - Table names (including temp tables `#table` and global `##table`)
-  - Column names in SELECT, WHERE, JOIN, INSERT
+  - Column names in `SELECT`, `WHERE`, `JOIN`, `INSERT`, and column definitions
   - CTE (Common Table Expression) names
-  - Preserves schema qualifiers (e.g., `dbo.`)
+  - Preserves schema qualifiers (for example `dbo.`)
   - Preserves aliases and variables
-- **Non-renaming guarantees**:
+- Non-renaming guarantees:
   - SQL keywords
   - String/numeric literals
   - Variables (`@variable`)
@@ -51,7 +51,7 @@ python obfuscator.py input.sql > output.sql
 
 #### `--dialect` (default: `tsql`)
 
-Specifies the SQL dialect for parsing. Currently tested with `tsql` (SQL Server T-SQL).
+Specifies the SQL dialect for parsing.
 
 ```bash
 python obfuscator.py script.sql --dialect tsql
@@ -59,7 +59,7 @@ python obfuscator.py script.sql --dialect tsql
 
 #### `--seed` (optional)
 
-Enables deterministic mode with a fixed random seed. Same seed always produces identical output.
+Enables deterministic mode with a fixed random seed.
 
 ```bash
 python obfuscator.py script.sql --seed 42
@@ -73,7 +73,7 @@ Useful for:
 
 #### `--strict-go` (optional)
 
-Enables strict batch handling mode. Reserved for future use (currently processing all batches).
+Accepted by the CLI for future strict batch handling. Current implementation treats it as a no-op.
 
 ```bash
 python obfuscator.py script.sql --strict-go
@@ -107,30 +107,34 @@ python obfuscator.py users.sql --seed 42 > run2.sql
 
 ## How It Works
 
-1. **Parse**: SQL script is parsed using `sqlglot` with the specified dialect
-2. **Split**: Script is split on standalone `GO` statements (batch separators)
-3. **Transform**: Each batch is transformed via AST visitor:
-   - Identifies all identifier nodes (table, column, CTE names)
+1. Parse: SQL script is parsed using `sqlglot` with the specified dialect.
+2. Split: script is split on standalone `GO` statements.
+3. Transform: each batch is transformed via AST visitor:
+   - Identifies identifier nodes (table, column, CTE names)
    - Looks up or generates replacement animal-based names
    - Replaces identifiers in the AST
-4. **Validate**: Output is verified to remain parseable
-5. **Emit**: Transformed SQL is written to stdout with `GO` batch separators preserved
+4. Emit: transformed SQL is written to stdout with `GO` separators preserved.
+
+Note: parseability of transformed output is covered by automated tests, not by an extra final parse pass in the runtime pipeline.
 
 ## Identifier Replacement Strategy
 
-Names are generated from a list of animal names (e.g., `shark`, `dolphin`, `eagle`). Names are:
+Names are generated from a list of animal names (for example `shark`, `dolphin`, `eagle`). Names are:
 
-- **Unique** within a script run
-- **Deterministic** when using `--seed`
-- **Safe** for T-SQL (no reserved keywords)
-- **Unambiguous** (same identifier always maps to same replacement)
+- Unique within a script run
+- Deterministic when using `--seed`
+- Safe for T-SQL (no reserved keywords)
+- Unambiguous (same normalized identifier maps to the same replacement)
+
+When the base animal pool is exhausted, suffixed fallback names are generated (for example `lion2`, `lion3`) while still enforcing identifier safety.
 
 ### Case and Bracket Normalization
 
 Identifiers in SQL Server are case-insensitive and can be bracketed. The obfuscator:
 
-- Normalizes to lowercase for matching (so `UserId`, `userid`, `USERID` all map to the same replacement)
-- Preserves brackets when output requires them (legacy or special characters)
+- Normalizes to lowercase for mapping (`UserId`, `userid`, `USERID` map together)
+- Handles bracketed identifiers correctly
+- Preserves temp table prefixes (`#` / `##`)
 
 ### Example
 
@@ -140,64 +144,61 @@ Input:
 SELECT UserId, UserName FROM Users WHERE Status = 'Active';
 ```
 
-Output (example with seed=42):
+Output (example with `seed=42`):
 
 ```sql
 SELECT shark, dolphin FROM tiger WHERE eagle = 'Active';
 ```
 
-Note: String literal `'Active'` is unchanged.
+String literal `'Active'` is unchanged.
 
 ## Known Limitations
 
-1. **Non-standalone GO**: GO text that's part of identifiers (e.g., `GoTable`, `GOING_CONCERN`) is not treated as a batch separator.
-2. **Alias Preservation**: Table and column aliases are preserved as-is. Only the underlying identifier is renamed.
-
-3. **Dynamic SQL**: String literals containing SQL code are not parsed or transformed. E.g.:
+1. Non-standalone `GO`: text such as `GoTable` or `GOING_CONCERN` is not treated as a batch separator.
+2. Dynamic SQL: string literals containing SQL code are not parsed or transformed.
 
    ```sql
-   EXEC sp_executesql N'SELECT * FROM Users';  -- Users won't be renamed
+   EXEC sp_executesql N'SELECT * FROM Users';  -- Users will not be renamed inside the string
    ```
 
-4. **Comments**: SQL comments are preserved but identifier mentions within comments are not transformed.
-
-5. **Semantic Equivalence**: Obfuscation preserves **syntactic** validity, not semantic meaning. Logic depending on identifier names (rare) would break.
+3. Comments: comment text is not transformed.
+4. Semantic equivalence: obfuscation targets syntactic validity, not semantic meaning.
+5. Formatting: `sqlglot` may normalize SQL formatting/comments during output.
 
 ## Guarantee Boundaries
 
-### What is Guaranteed
+### What Is Guaranteed
 
-- ✅ Output is valid, parseable T-SQL (same dialect as input)
-- ✅ No reserved keywords are generated as identifiers
-- ✅ Same seed produces identical output (deterministic)
-- ✅ All table, column, and CTE names are renamed
-- ✅ Schema qualifiers are preserved
-- ✅ Variables, keywords, and string literals are unchanged
-- ✅ Batch structure (GO separators) is preserved
+- Output is valid, parseable T-SQL for successfully transformed batches.
+- No reserved keywords are generated as identifiers.
+- Same seed produces identical output.
+- Table, column, and CTE identifiers targeted by the transformer are renamed consistently.
+- Schema qualifiers are preserved.
+- Variables, keywords, and string literals are unchanged.
+- Batch structure (`GO` separators) is preserved.
 
-### What is NOT Guaranteed
+### What Is Not Guaranteed
 
-- ❌ Semantic equivalence (would be impossible to guarantee for all SQL)
-- ❌ Performance (obfuscated queries may have different plans)
-- ❌ Application-specific logic relying on identifier names
-- ❌ Very large scripts hitting animal name pool limits (fallback names are used)
+- Semantic equivalence for all SQL workloads
+- Performance equivalence (execution plans may differ)
+- Application-specific logic relying on identifier names
 
 ## Error Handling
 
-Errors are printed to stderr with context. Exit code is 1 on error, 0 on success.
+Errors are printed to stderr with context. Exit code is `1` on error, `0` on success.
 
 ### Error Examples
 
-**Missing file:**
+Missing file:
 
-```
+```text
 $ python obfuscator.py nonexistent.sql
 Error: Input file not found: nonexistent.sql
 ```
 
-**Parse error:**
+Parse error:
 
-```
+```text
 $ python obfuscator.py broken.sql
 Error: Parse error in batch 2/3:
   Error: Required keyword: 'this' missing for...
@@ -217,34 +218,27 @@ pytest -k "test_determinism"    # Matching pattern
 
 ### Project Structure
 
-```
+```text
 sql-obfuscator/
-├── src/sql_obfuscator/
-│   ├── __init__.py
-│   ├── cli.py              # CLI entry point
-│   ├── pipeline.py         # Main obfuscation pipeline
-│   ├── transformer.py      # AST transformation logic
-│   ├── registry.py         # Identifier mapping registry
-│   ├── names.py            # Name generation and validation
-│   ├── go_batches.py       # GO statement splitting
-│   ├── errors.py           # Custom exception types
-│   └── *.txt               # Data files (keywords, animals)
-├── tests/
-│   ├── test_*.py           # Test modules (63+ tests)
-│   └── conftest.py         # Pytest fixtures
-└── README.md               # This file
+|-- src/sql_obfuscator/
+|   |-- __init__.py
+|   |-- cli.py                 # CLI entry point
+|   |-- pipeline.py            # Main obfuscation pipeline
+|   |-- transformer.py         # AST transformation logic
+|   |-- registry.py            # Identifier mapping registry
+|   |-- names.py               # Name generation and validation
+|   |-- go_batches.py          # GO statement splitting
+|   |-- errors.py              # Custom exception types
+|   `-- *.txt                  # Data files (keywords, animals)
+|-- tests/
+|   |-- test_*.py
+|   `-- conftest.py
+`-- README.md
 ```
 
 ### Test Coverage
 
-- 63 tests covering:
-  - CLI argument parsing and error handling
-  - Batch splitting and GO separator handling
-  - Identifier name generation and collision prevention
-  - AST transformation correctness
-  - Parser error reporting with context
-  - Output parseability verification
-  - Deterministic behavior with seeds
+The current suite contains 70+ test functions across CLI, parsing/batches, transformation, identifier safety, determinism, and output parseability scenarios.
 
 ## License
 
