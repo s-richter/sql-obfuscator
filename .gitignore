@@ -30,6 +30,8 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 .pytest_cache/
+.tmp_pytest
+.tmp_test
 .coverage
 .coverage.*
 coverage.xml
@@ -61,3 +63,4 @@ ENV/
 .DS_Store
 Thumbs.db
 Desktop.ini
+

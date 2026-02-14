@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 
@@ -28,8 +28,8 @@ class TestPositiveTests:
         # Both table names should be renamed
         assert "TableA" not in result
         assert "TableB" not in result
-        # But we should have aliases preserved or replaced consistently
-        assert result.count("a.") > 0 or result.count("b.") > 0
+        # Aliases should be present but not the original single-letter aliases
+        assert " AS " in result and "a." not in result and "b." not in result
 
     def test_temp_table_single_hash(self):
         """Single # temp tables should preserve temp marker."""

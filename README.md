@@ -13,13 +13,12 @@ Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE 
   - Column names in `SELECT`, `WHERE`, `JOIN`, `INSERT`, and column definitions
   - CTE (Common Table Expression) names
   - Preserves schema qualifiers (for example `dbo.`)
-  - Preserves aliases and variables
+  - Obfuscates aliases and preserves variables
 - Non-renaming guarantees:
   - SQL keywords
   - String/numeric literals
   - Variables (`@variable`)
   - Function invocation names
-  - Aliases
 
 ## Installation
 

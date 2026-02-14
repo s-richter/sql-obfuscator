@@ -1,4 +1,4 @@
-"""
+﻿"""
 Final validation tests for Task 11.
 
 These tests verify the complete system works as expected:
@@ -74,8 +74,8 @@ class TestFullTestSuite:
         # Should succeed
         assert rc == 0
 
-    def test_no_unintended_alias_renaming(self):
-        """Verify aliases are NOT renamed (only underlying identifiers)."""
+    def test_aliases_are_obfuscated(self):
+        """Verify aliases are obfuscated consistently."""
         sql = """
         SELECT 
             u.UserId AS ID,
@@ -86,9 +86,9 @@ class TestFullTestSuite:
         """
         result = obfuscate_sql(sql)
 
-        # Aliases should still be present (possibly renamed, but not affected by logic)
-        # What matters: ID, Name, OrderNum should appear or the AS keyword should appear
-        assert "AS" in result or result.count("ID") > 0
+         # Aliases should not remain as original tokens
+        # ID/Name/OrderNum should be obfuscated from their original alias values
+        assert "ID" not in result.upper() and "NAME" not in result.upper() and "ORDERNUM" not in result.upper()
 
     def test_no_unintended_schema_renaming(self):
         """Verify schema names (dbo, schema) are preserved."""

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from collections.abc import Sequence
 
@@ -43,7 +43,10 @@ def _rename_table(table: exp.Table, registry: IdentifierRegistry) -> exp.Table:
     identifier = table.this
     if not isinstance(identifier, exp.Identifier):
         return table
+
     if _is_update_alias_target(table):
+        # UPDATE alias target should follow alias obfuscation, not table-name obfuscation.
+        identifier.set("this", registry.get_or_create(identifier.name))
         return table
 
     renamed = registry.get_or_create(_raw_table_name(identifier))
@@ -53,9 +56,13 @@ def _rename_table(table: exp.Table, registry: IdentifierRegistry) -> exp.Table:
 
 def _rename_column(column: exp.Column, registry: IdentifierRegistry) -> exp.Column:
     identifier = column.this
-    if not isinstance(identifier, exp.Identifier):
-        return column
-    identifier.set("this", registry.get_or_create(identifier.name))
+    if isinstance(identifier, exp.Identifier):
+        identifier.set("this", registry.get_or_create(identifier.name))
+
+    table_identifier = column.args.get("table")
+    if isinstance(table_identifier, exp.Identifier):
+        table_identifier.set("this", registry.get_or_create(table_identifier.name))
+
     return column
 
 
@@ -65,6 +72,29 @@ def _rename_cte(cte: exp.CTE, registry: IdentifierRegistry) -> exp.CTE:
         return cte
     alias.this.set("this", registry.get_or_create(alias.this.name))
     return cte
+
+
+def _rename_table_alias(table_alias: exp.TableAlias, registry: IdentifierRegistry) -> exp.TableAlias:
+    # CTE declaration alias is handled in _rename_cte.
+    if isinstance(table_alias.parent, exp.CTE):
+        return table_alias
+
+    alias_identifier = table_alias.this
+    if isinstance(alias_identifier, exp.Identifier):
+        alias_identifier.set("this", registry.get_or_create(alias_identifier.name))
+
+    for identifier in table_alias.args.get("columns") or []:
+        if isinstance(identifier, exp.Identifier):
+            identifier.set("this", registry.get_or_create(identifier.name))
+
+    return table_alias
+
+
+def _rename_expression_alias(alias: exp.Alias, registry: IdentifierRegistry) -> exp.Alias:
+    alias_identifier = alias.args.get("alias")
+    if isinstance(alias_identifier, exp.Identifier):
+        alias_identifier.set("this", registry.get_or_create(alias_identifier.name))
+    return alias
 
 
 def _rename_column_def(column_def: exp.ColumnDef, registry: IdentifierRegistry) -> exp.ColumnDef:
@@ -96,6 +126,10 @@ def transform_statements(
             return _rename_column(node, registry)
         if isinstance(node, exp.CTE):
             return _rename_cte(node, registry)
+        if isinstance(node, exp.TableAlias):
+            return _rename_table_alias(node, registry)
+        if isinstance(node, exp.Alias):
+            return _rename_expression_alias(node, registry)
         if isinstance(node, exp.ColumnDef):
             return _rename_column_def(node, registry)
         if isinstance(node, exp.Schema):

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 from sqlglot import parse
@@ -200,15 +200,15 @@ class TestOutputSyntacticValidity:
         # Verify dbo is still in output
         assert "dbo" in result
 
-    def test_column_aliases_preserved(self):
-        """Column aliases should be preserved (not renamed)."""
+    def test_column_aliases_obfuscated(self):
+        """Column aliases should be obfuscated consistently."""
         sql = """
         SELECT UserId AS ID, UserName AS Name
         FROM Users;
         """
         result = obfuscate_sql(sql)
-        # Aliases (ID, Name) should appear in output
-        assert "ID" in result.upper() or "AS" in result
+        # Aliases should be obfuscated, not kept as original tokens
+        assert "ID" not in result.upper() and "NAME" not in result.upper()
         statements = parse(result, dialect="tsql")
         assert len(statements) > 0
 
