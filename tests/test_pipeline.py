@@ -53,3 +53,25 @@ def test_parse_error_includes_sql_snippet():
     # Should include SQL snippet and batch info
     assert "SQL:" in error_msg
     assert "batch" in error_msg
+
+
+def test_pretty_output_is_multiline():
+    sql = "SELECT UserId, UserName FROM Users WHERE Status = 1;"
+    result = obfuscate_sql(sql, pretty=True, seed=1)
+
+    assert "\n" in result
+    assert "SELECT" in result
+
+
+def test_pretty_is_default():
+    sql = "SELECT UserId, UserName FROM Users WHERE Status = 1;"
+    result = obfuscate_sql(sql, seed=1)
+
+    assert "\n" in result
+
+
+def test_no_pretty_output_is_compact():
+    sql = "SELECT UserId, UserName FROM Users WHERE Status = 1;"
+    result = obfuscate_sql(sql, pretty=False, seed=1)
+
+    assert "\n" not in result

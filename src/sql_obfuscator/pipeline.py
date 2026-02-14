@@ -41,6 +41,7 @@ def _process_batch(
     *,
     dialect: str,
     registry: IdentifierRegistry,
+    pretty: bool = False,
     batch_number: int = 1,
     total_batches: int = 1,
 ) -> str:
@@ -55,7 +56,9 @@ def _process_batch(
         raise ParseScriptError(error_msg) from exc
 
     transformed = transform_statements(statements, registry=registry)
-    return ";\n".join(stmt.sql(dialect=dialect) for stmt in transformed)
+    return ";\n".join(
+        stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed
+    )
 
 
 def obfuscate_sql(
@@ -64,6 +67,7 @@ def obfuscate_sql(
     dialect: str = "tsql",
     seed: int | None = None,
     strict_go: bool = False,
+    pretty: bool = True,
 ) -> str:
     del strict_go  # reserved for future strict GO edge-case handling
     registry = IdentifierRegistry(seed=seed)
@@ -74,6 +78,7 @@ def obfuscate_sql(
             batch,
             dialect=dialect,
             registry=registry,
+            pretty=pretty,
             batch_number=batch_idx,
             total_batches=len(batches),
         )

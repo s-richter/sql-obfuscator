@@ -17,6 +17,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dialect", default="tsql", help="sqlglot dialect (default: tsql)")
     parser.add_argument("--seed", type=int, default=None, help="Deterministic random seed")
     parser.add_argument(
+        "--pretty",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Pretty-format transformed SQL output (default: enabled)",
+    )
+    parser.add_argument(
         "--strict-go",
         action="store_true",
         help="Fail if batch separators cannot be handled safely",
@@ -60,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             dialect=args.dialect,
             seed=args.seed,
             strict_go=args.strict_go,
+            pretty=args.pretty,
         )
         _write_output_file(_output_path_for_input(input_path), output_sql)
     except (ObfuscatorError, ParseScriptError) as exc:

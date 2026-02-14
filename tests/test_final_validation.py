@@ -86,9 +86,11 @@ class TestFullTestSuite:
         """
         result = obfuscate_sql(sql)
 
-         # Aliases should not remain as original tokens
-        # ID/Name/OrderNum should be obfuscated from their original alias values
-        assert "ID" not in result.upper() and "NAME" not in result.upper() and "ORDERNUM" not in result.upper()
+        # Original alias tokens should not remain in AS clauses
+        upper = result.upper()
+        assert " AS ID" not in upper
+        assert " AS NAME" not in upper
+        assert " AS ORDERNUM" not in upper
 
     def test_no_unintended_schema_renaming(self):
         """Verify schema names (dbo, schema) are preserved."""

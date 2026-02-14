@@ -20,7 +20,8 @@ def test_cli_prints_output_for_valid_sql(tmp_path: Path, capsys):
     captured = capsys.readouterr()
 
     assert rc == 0
-    assert "SELECT 1" in captured.out
+    assert "SELECT" in captured.out
+    assert "1" in captured.out
 
 
 def test_cli_writes_obfuscated_output_file(tmp_path: Path, capsys):
@@ -33,7 +34,9 @@ def test_cli_writes_obfuscated_output_file(tmp_path: Path, capsys):
     output_file = tmp_path / "input_obfuscated.sql"
     assert rc == 0
     assert output_file.exists()
-    assert "SELECT 1" in output_file.read_text(encoding="utf-8")
+    output = output_file.read_text(encoding="utf-8")
+    assert "SELECT" in output
+    assert "1" in output
 
 
 def test_cli_parse_error_returns_nonzero_with_context(tmp_path: Path, capsys):
@@ -74,3 +77,38 @@ def test_cli_parse_error_does_not_write_output_file(tmp_path: Path, capsys):
     output_file = tmp_path / "invalid_obfuscated.sql"
     assert rc == 1
     assert not output_file.exists()
+
+
+def test_cli_pretty_writes_pretty_output_file(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "SELECT UserId, UserName FROM Users WHERE Status = 1;",
+        encoding="utf-8",
+    )
+
+    rc = main([str(sql_file), "--pretty"])
+    captured = capsys.readouterr()
+
+    output_file = tmp_path / "input_obfuscated.sql"
+    assert rc == 0
+    assert output_file.exists()
+    output = output_file.read_text(encoding="utf-8")
+    assert "\n" in output
+    assert "\n" in captured.out
+
+
+def test_cli_no_pretty_writes_compact_output_file(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "SELECT UserId, UserName FROM Users WHERE Status = 1;",
+        encoding="utf-8",
+    )
+
+    rc = main([str(sql_file), "--no-pretty"])
+    capsys.readouterr()
+
+    output_file = tmp_path / "input_obfuscated.sql"
+    assert rc == 0
+    assert output_file.exists()
+    output = output_file.read_text(encoding="utf-8")
+    assert "\n" not in output

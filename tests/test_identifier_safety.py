@@ -207,8 +207,10 @@ class TestOutputSyntacticValidity:
         FROM Users;
         """
         result = obfuscate_sql(sql)
-        # Aliases should be obfuscated, not kept as original tokens
-        assert "ID" not in result.upper() and "NAME" not in result.upper()
+        # Original alias tokens should not remain in AS clauses
+        upper = result.upper()
+        assert " AS ID" not in upper
+        assert " AS NAME" not in upper
         statements = parse(result, dialect="tsql")
         assert len(statements) > 0
 

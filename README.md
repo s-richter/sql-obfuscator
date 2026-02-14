@@ -74,6 +74,16 @@ Useful for:
 - Testing
 - Consistent obfuscation across runs
 
+#### `--pretty` / `--no-pretty`
+
+Pretty formatting is enabled by default for transformed SQL output (stdout and `_obfuscated` file).
+Use `--no-pretty` to disable formatting and emit compact SQL.
+
+```bash
+python obfuscator.py script.sql --pretty
+python obfuscator.py script.sql --no-pretty
+```
+
 #### `--strict-go` (optional)
 
 Accepted by the CLI for future strict batch handling. Current implementation treats it as a no-op.
@@ -94,6 +104,12 @@ python obfuscator.py users.sql
 
 ```bash
 python obfuscator.py users.sql --seed 12345 > obfuscated.sql
+```
+
+#### Pretty output
+
+```bash
+python obfuscator.py users.sql --pretty
 ```
 
 #### Multiple runs with same seed
