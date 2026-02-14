@@ -161,8 +161,8 @@ Generate `llm_instructions.md` in workspace with strict guidance:
 - Add report generation.
 
 ### Phase 4: Roundtrip verification mode
-- Implement immediate obfuscate+deobfuscate command.
-- Add machine-readable and human-readable diff reports.
+- [x] Implement immediate obfuscate+deobfuscate command.
+- [x] Add machine-readable and human-readable diff reports.
 
 ### Phase 5: Docs and examples
 - README updates with full LLM workflow.
@@ -171,48 +171,48 @@ Generate `llm_instructions.md` in workspace with strict guidance:
 ## Actionable Checklist
 
 ### A) Data model and persistence
-- [ ] Define `mapping.json` schema (versioned).
-- [ ] Define `context.json` schema (dialect, seed, batch/statement metadata).
-- [ ] Implement mapping writer/reader modules.
-- [ ] Add schema validation on load.
+- [x] Define `mapping.json` schema (versioned).
+- [x] Define `context.json` schema (dialect, seed, batch/statement metadata).
+- [x] Implement mapping writer/reader modules.
+- [x] Add schema validation on load.
 
 ### B) Transformer instrumentation
-- [ ] Emit mapping records during obfuscation for all renamed kinds.
-- [ ] Capture original lexical details (case, brackets, temp prefixes).
-- [ ] Capture scope metadata for alias-safe reverse mapping.
+- [x] Emit mapping records during obfuscation for all renamed kinds.
+- [x] Capture original lexical details (case, brackets, temp prefixes).
+- [x] Capture scope metadata for alias-safe reverse mapping.
 
 ### C) CLI and workspace operations
-- [ ] Implement `obfuscate` subcommand with workspace creation.
-- [ ] Implement `deobfuscate` subcommand consuming workspace artifacts.
-- [ ] Implement `roundtrip` subcommand.
-- [ ] Add `workspace-info` subcommand (optional but recommended).
-- [ ] Keep old CLI mode functional or provide explicit migration note.
+- [x] Implement `obfuscate` subcommand with workspace creation.
+- [x] Implement `deobfuscate` subcommand consuming workspace artifacts.
+- [x] Implement `roundtrip` subcommand.
+- [x] Add `workspace-info` subcommand (optional but recommended).
+- [x] Keep old CLI mode functional or provide explicit migration note.
 
 ### D) Reverse mapping engine
-- [ ] Build AST-based reverse transformer.
-- [ ] Implement scoped conflict resolution.
-- [ ] Restore original lexical forms for identifiers.
-- [ ] Emit de-obfuscation coverage/conflict report.
+- [x] Build AST-based reverse transformer.
+- [x] Implement scoped conflict resolution.
+- [x] Restore original lexical forms for identifiers.
+- [x] Emit de-obfuscation coverage/conflict report.
 
 ### E) LLM workflow support
-- [ ] Generate `llm_instructions.md` in workspace.
-- [ ] Add command-line option to customize instruction template.
-- [ ] Add tests for expected instruction file content.
+- [x] Generate `llm_instructions.md` in workspace.
+- [x] Add command-line option to customize instruction template.
+- [x] Add tests for expected instruction file content.
 
 ### F) Testing
-- [ ] Add unit tests for mapping and lexical restoration.
-- [ ] Add integration tests for full workflow with edited obfuscated SQL.
-- [ ] Add regression tests for GO batches and alias edge cases.
-- [ ] Add deterministic tests for saved mapping reproducibility.
+- [x] Add unit tests for mapping and lexical restoration.
+- [x] Add integration tests for full workflow with edited obfuscated SQL.
+- [x] Add regression tests for GO batches and alias edge cases.
+- [x] Add deterministic tests for saved mapping reproducibility.
 
 ### G) Documentation
-- [ ] Update README with new command set and workspace layout.
-- [ ] Add a "LLM optimization workflow" section with end-to-end steps.
-- [ ] Add troubleshooting guide for unresolved identifiers.
+- [x] Update README with new command set and workspace layout.
+- [x] Add a "LLM optimization workflow" section with end-to-end steps.
+- [x] Add troubleshooting guide for unresolved identifiers.
 
 ### H) Optional future hardening
-- [ ] Add mapping signature/checksum to detect workspace tampering.
-- [ ] Add dry-run de-obfuscation mode.
+- [x] Add mapping signature/checksum to detect workspace tampering.
+- [x] Add dry-run de-obfuscation mode.
 - [ ] Add JSON report export for CI automation.
 
 ## Suggested First Delivery Slice

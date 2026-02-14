@@ -1,19 +1,30 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import sys
 from pathlib import Path
 
-from .errors import InputFileError, ObfuscatorError, ParseScriptError
-from .pipeline import obfuscate_sql
+from .deobfuscation import deobfuscate_sql_with_report
+from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
+from .pipeline import obfuscate_sql_with_metadata
+from .workspace import (
+    default_workspace_path,
+    load_context_payload,
+    load_mapping_payload,
+    save_deobfuscation_artifacts,
+    save_roundtrip_reports,
+    save_workspace_artifacts,
+    validate_workspace_integrity,
+)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="obfuscator.py",
-        description="Obfuscate SQL identifiers in a T-SQL script.",
+def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace folder for saved artifacts (default: <input_stem>.obf)",
     )
-    parser.add_argument("sql_file", help="Path to input .sql file")
     parser.add_argument("--dialect", default="tsql", help="sqlglot dialect (default: tsql)")
     parser.add_argument("--seed", type=int, default=None, help="Deterministic random seed")
     parser.add_argument(
@@ -26,6 +37,83 @@ def build_parser() -> argparse.ArgumentParser:
         "--strict-go",
         action="store_true",
         help="Fail if batch separators cannot be handled safely",
+    )
+    parser.add_argument(
+        "--instruction-template",
+        default=None,
+        help="Optional path to a markdown template used as llm_instructions.md",
+    )
+
+
+def build_legacy_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="obfuscator.py",
+        description="Obfuscate SQL identifiers in a T-SQL script.",
+    )
+    parser.add_argument("sql_file", help="Path to input .sql file")
+    _add_common_obfuscation_args(parser)
+    return parser
+
+
+def build_command_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="obfuscator.py",
+        description="SQL obfuscation workspace commands.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    obfuscate_parser = subparsers.add_parser(
+        "obfuscate",
+        help="Obfuscate a SQL script and persist workspace artifacts",
+    )
+    obfuscate_parser.add_argument("sql_file", help="Path to input .sql file")
+    _add_common_obfuscation_args(obfuscate_parser)
+
+    deobfuscate_parser = subparsers.add_parser(
+        "deobfuscate",
+        help="De-obfuscate an edited obfuscated SQL script using workspace artifacts",
+    )
+    deobfuscate_parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to workspace folder created during obfuscation",
+    )
+    deobfuscate_parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to edited obfuscated SQL script",
+    )
+    deobfuscate_parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output path for de-obfuscated SQL",
+    )
+    deobfuscate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Analyze de-obfuscation and print report summary without writing files",
+    )
+
+    roundtrip_parser = subparsers.add_parser(
+        "roundtrip",
+        help="Obfuscate and immediately de-obfuscate for verification",
+    )
+    roundtrip_parser.add_argument("sql_file", help="Path to input .sql file")
+    _add_common_obfuscation_args(roundtrip_parser)
+    roundtrip_parser.add_argument(
+        "--diff-report",
+        action="store_true",
+        help="Reserved for future roundtrip diff reporting",
+    )
+
+    workspace_info_parser = subparsers.add_parser(
+        "workspace-info",
+        help="Show workspace artifact and report status",
+    )
+    workspace_info_parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to workspace folder",
     )
     return parser
 
@@ -54,24 +142,230 @@ def _write_output_file(path: Path, content: str) -> None:
         raise InputFileError(f"Unable to write output file: {path}") from exc
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-
+def _read_optional_template(path: str | None) -> str | None:
+    if path is None:
+        return None
+    template_path = Path(path)
+    if not template_path.exists():
+        raise InputFileError(f"Instruction template not found: {template_path}")
+    if not template_path.is_file():
+        raise InputFileError(f"Instruction template path is not a file: {template_path}")
     try:
-        input_path = Path(args.sql_file)
-        sql_text = _read_sql_file(input_path)
-        output_sql = obfuscate_sql(
-            sql_text,
-            dialect=args.dialect,
-            seed=args.seed,
-            strict_go=args.strict_go,
-            pretty=args.pretty,
-        )
-        _write_output_file(_output_path_for_input(input_path), output_sql)
-    except (ObfuscatorError, ParseScriptError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        return template_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise InputFileError(f"Unable to read instruction template: {template_path}") from exc
+
+
+def _run_obfuscate_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.sql_file)
+    sql_text = _read_sql_file(input_path)
+    result = obfuscate_sql_with_metadata(
+        sql_text,
+        dialect=args.dialect,
+        seed=args.seed,
+        strict_go=args.strict_go,
+        pretty=args.pretty,
+    )
+    output_sql = result.output_sql
+    _write_output_file(_output_path_for_input(input_path), output_sql)
+    llm_instructions_text = _read_optional_template(args.instruction_template)
+
+    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_path)
+    save_workspace_artifacts(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=sql_text,
+        obfuscated_sql=output_sql,
+        mapping_payload=result.mapping_payload,
+        context_payload=result.context_payload,
+        llm_instructions_text=llm_instructions_text,
+    )
+    # Validate schema and data shape immediately after write.
+    load_mapping_payload(workspace_path / "mapping.json")
+    load_context_payload(workspace_path / "context.json")
+    validate_workspace_integrity(workspace_path)
 
     print(output_sql)
     return 0
+
+
+def _run_deobfuscate_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    validate_workspace_integrity(workspace_path)
+    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
+    context_payload = load_context_payload(workspace_path / "context.json")
+    input_path = Path(args.input)
+    edited_sql = _read_sql_file(input_path)
+
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        edited_sql,
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+    )
+    if args.dry_run:
+        print("deobfuscate dry-run summary:")
+        print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
+        print(f"unknown_count: {report.get('unknown_count', 0)}")
+        print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
+        print(f"unknown_by_kind: {report.get('unknown_by_kind', {})}")
+        print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
+        for recommendation in report.get("recommendations", []):
+            print(f"recommendation: {recommendation}")
+        if report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0:
+            return 1
+        return 0
+
+    output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
+    _write_output_file(output_path, deobfuscated_sql)
+    save_deobfuscation_artifacts(
+        workspace_path=workspace_path,
+        deobfuscated_sql=deobfuscated_sql,
+        report_payload=report,
+    )
+    print(deobfuscated_sql)
+    return 0
+
+
+def _run_roundtrip_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.sql_file)
+    original_sql = _read_sql_file(input_path)
+
+    obfuscation = obfuscate_sql_with_metadata(
+        original_sql,
+        dialect=args.dialect,
+        seed=args.seed,
+        strict_go=args.strict_go,
+        pretty=args.pretty,
+    )
+    obfuscated_sql = obfuscation.output_sql
+    _write_output_file(_output_path_for_input(input_path), obfuscated_sql)
+    llm_instructions_text = _read_optional_template(args.instruction_template)
+
+    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_path)
+    save_workspace_artifacts(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=original_sql,
+        obfuscated_sql=obfuscated_sql,
+        mapping_payload=obfuscation.mapping_payload,
+        context_payload=obfuscation.context_payload,
+        llm_instructions_text=llm_instructions_text,
+    )
+    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
+    context_payload = load_context_payload(workspace_path / "context.json")
+    validate_workspace_integrity(workspace_path)
+
+    deobfuscated_sql, deobfuscation_report = deobfuscate_sql_with_report(
+        obfuscated_sql,
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+    )
+    save_deobfuscation_artifacts(
+        workspace_path=workspace_path,
+        deobfuscated_sql=deobfuscated_sql,
+        report_payload=deobfuscation_report,
+    )
+
+    diff_lines = list(
+        difflib.unified_diff(
+            original_sql.splitlines(keepends=True),
+            deobfuscated_sql.splitlines(keepends=True),
+            fromfile="original.sql",
+            tofile="deobfuscated.sql",
+        )
+    )
+    roundtrip_report = {
+        "schema_version": 1,
+        "exact_match": original_sql == deobfuscated_sql,
+        "original_char_count": len(original_sql),
+        "deobfuscated_char_count": len(deobfuscated_sql),
+        "diff_line_count": len(diff_lines),
+        "deobfuscation_report": deobfuscation_report,
+    }
+    save_roundtrip_reports(
+        workspace_path=workspace_path,
+        report_payload=roundtrip_report,
+        diff_text="".join(diff_lines) if args.diff_report else None,
+    )
+
+    print(deobfuscated_sql)
+    if deobfuscation_report.get("unknown_count", 0) > 0:
+        return 1
+    if deobfuscation_report.get("ambiguous_count", 0) > 0:
+        return 1
+    return 0
+
+
+def _run_workspace_info_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    if not workspace_path.exists() or not workspace_path.is_dir():
+        raise WorkspaceError(f"Workspace not found or not a directory: {workspace_path}")
+
+    mapping_path = workspace_path / "mapping.json"
+    context_path = workspace_path / "context.json"
+    original_path = workspace_path / "original.sql"
+    obfuscated_path = workspace_path / "obfuscated.sql"
+    instructions_path = workspace_path / "llm_instructions.md"
+    deobfuscated_path = workspace_path / "deobfuscated.sql"
+    reports_path = workspace_path / "reports"
+    deobf_report_path = reports_path / "deobfuscation_report.json"
+    roundtrip_report_path = reports_path / "roundtrip_report.json"
+    coverage_report_path = reports_path / "coverage_report.txt"
+    roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
+
+    mapping_payload = load_mapping_payload(mapping_path)
+    context_payload = load_context_payload(context_path)
+    integrity_payload = validate_workspace_integrity(workspace_path)
+
+    lines = [
+        f"workspace: {workspace_path}",
+        f"dialect: {context_payload.get('dialect')}",
+        f"seed: {context_payload.get('seed')}",
+        f"pretty: {context_payload.get('pretty')}",
+        f"batches: {context_payload.get('batch_count')}",
+        f"statements: {context_payload.get('statement_count')}",
+        f"mapping entries: {context_payload.get('mapping_entry_count')}",
+        f"mapping forward index size: {len(mapping_payload.get('forward_index', {}))}",
+        f"mapping reverse index size: {len(mapping_payload.get('reverse_index', {}))}",
+        f"integrity algorithm: {integrity_payload.get('algorithm')}",
+        f"integrity tracked files: {len(integrity_payload.get('files', {}))}",
+        f"original.sql: {'yes' if original_path.exists() else 'no'}",
+        f"obfuscated.sql: {'yes' if obfuscated_path.exists() else 'no'}",
+        f"llm_instructions.md: {'yes' if instructions_path.exists() else 'no'}",
+        f"deobfuscated.sql: {'yes' if deobfuscated_path.exists() else 'no'}",
+        f"reports/deobfuscation_report.json: {'yes' if deobf_report_path.exists() else 'no'}",
+        f"reports/roundtrip_report.json: {'yes' if roundtrip_report_path.exists() else 'no'}",
+        f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
+        f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
+    ]
+    print("\n".join(lines))
+    return 0
+
+
+def _is_subcommand_mode(argv: list[str] | None) -> bool:
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        return False
+    return argv[0] in {"obfuscate", "deobfuscate", "roundtrip", "workspace-info"}
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_command_parser() if _is_subcommand_mode(argv) else build_legacy_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        if _is_subcommand_mode(argv):
+            if args.command == "obfuscate":
+                return _run_obfuscate_command(args)
+            if args.command == "deobfuscate":
+                return _run_deobfuscate_command(args)
+            if args.command == "roundtrip":
+                return _run_roundtrip_command(args)
+            if args.command == "workspace-info":
+                return _run_workspace_info_command(args)
+            raise WorkspaceError(f"Unknown command: {args.command}")
+        return _run_obfuscate_command(args)
+    except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1

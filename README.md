@@ -1,24 +1,14 @@
-﻿# SQL Identifier Obfuscator
+# SQL Identifier Obfuscator
 
-Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, temp tables) in T-SQL scripts using an AST-based workflow.
+Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, aliases, temp tables) in T-SQL scripts with an AST-based pipeline.
 
-## Features
+## What It Does
 
-- Deterministic obfuscation: same seed produces identical output
-- Batch processing: handles SQL scripts with standalone `GO` separators
-- Reserved keyword safety: generated names never collide with T-SQL keywords
-- Syntactic preservation: transformed output remains parseable T-SQL
-- Comprehensive renaming:
-  - Table names (including temp tables `#table` and global `##table`)
-  - Column names in `SELECT`, `WHERE`, `JOIN`, `INSERT`, and column definitions
-  - CTE (Common Table Expression) names
-  - Preserves schema qualifiers (for example `dbo.`)
-  - Obfuscates aliases and preserves variables
-- Non-renaming guarantees:
-  - SQL keywords
-  - String/numeric literals
-  - Variables (`@variable`)
-  - Function invocation names
+- Obfuscates identifier names while preserving SQL syntax.
+- Supports deterministic output with seeds.
+- Handles multi-batch scripts separated by standalone `GO`.
+- Creates a workspace folder per script with mapping/context artifacts for de-obfuscation workflows.
+- Supports LLM workflows: obfuscate -> send to LLM -> de-obfuscate edited output.
 
 ## Installation
 
@@ -26,239 +16,357 @@ Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE 
 pip install -e .
 ```
 
-For development with testing:
+For development:
 
 ```bash
 pip install -e .[dev]
 ```
 
-## Usage
+## Cheat Sheet
 
-### Basic Usage
+```bash
+# Obfuscate (default workspace: script.obf)
+python obfuscator.py obfuscate script.sql
+
+# Obfuscate deterministically
+python obfuscator.py obfuscate script.sql --seed 42
+
+# Obfuscate with custom workspace
+python obfuscator.py obfuscate script.sql --workspace my_run.obf
+
+# Validate LLM-edited obfuscated SQL without writing outputs
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
+
+# De-obfuscate and write restored SQL
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
+
+# One-command verification loop
+python obfuscator.py roundtrip script.sql --diff-report
+
+# Check workspace health/status (includes integrity check)
+python obfuscator.py workspace-info --workspace script.obf
+```
+
+## Core Commands
+
+- `obfuscate`: Obfuscate SQL and create workspace artifacts.
+- `deobfuscate`: Reverse obfuscation using workspace mapping/context.
+- `roundtrip`: Obfuscate and immediately de-obfuscate for verification.
+- `workspace-info`: Show workspace artifact/report status and integrity info.
+
+Legacy mode is still supported:
 
 ```bash
 python obfuscator.py script.sql
 ```
 
-Output is printed to stdout and also written to a sibling file named `<original>_obfuscated.sql`.
-
-Example: `script.sql` writes `script_obfuscated.sql`.
-
-Redirects are still supported:
+Equivalent to:
 
 ```bash
-python obfuscator.py input.sql > output.sql
+python obfuscator.py obfuscate script.sql
 ```
 
-### Configuration Flags
+## Obfuscation Behavior
 
-#### `--dialect` (default: `tsql`)
+### Renamed
 
-Specifies the SQL dialect for parsing.
+- Table names (including `#temp` and `##global_temp`)
+- Column references
+- CTE names
+- Table aliases
+- Projection aliases (`AS ...`)
+- Column definitions
+- Insert target column lists
 
-```bash
-python obfuscator.py script.sql --dialect tsql
-```
+### Not Renamed
 
-#### `--seed` (optional)
+- SQL keywords
+- String/numeric literals
+- Variables (`@...`)
+- Function invocation names
+- Schema qualifiers (for example `dbo`)
 
-Enables deterministic mode with a fixed random seed.
+## Workspace Model
 
-```bash
-python obfuscator.py script.sql --seed 42
-```
+By default, `script.sql` produces a workspace `script.obf/`.
 
-Useful for:
-
-- Reproducible transformations
-- Testing
-- Consistent obfuscation across runs
-
-#### `--pretty` / `--no-pretty`
-
-Pretty formatting is enabled by default for transformed SQL output (stdout and `_obfuscated` file).
-Use `--no-pretty` to disable formatting and emit compact SQL.
-
-```bash
-python obfuscator.py script.sql --pretty
-python obfuscator.py script.sql --no-pretty
-```
-
-#### `--strict-go` (optional)
-
-Accepted by the CLI for future strict batch handling. Current implementation treats it as a no-op.
-
-```bash
-python obfuscator.py script.sql --strict-go
-```
-
-### Examples
-
-#### Simple transform
-
-```bash
-python obfuscator.py users.sql
-```
-
-#### Deterministic output with seed
-
-```bash
-python obfuscator.py users.sql --seed 12345 > obfuscated.sql
-```
-
-#### Pretty output
-
-```bash
-python obfuscator.py users.sql --pretty
-```
-
-#### Multiple runs with same seed
-
-```bash
-# Run 1
-python obfuscator.py users.sql --seed 42 > run1.sql
-
-# Run 2
-python obfuscator.py users.sql --seed 42 > run2.sql
-
-# run1.sql and run2.sql are identical
-```
-
-## How It Works
-
-1. Parse: SQL script is parsed using `sqlglot` with the specified dialect.
-2. Split: script is split on standalone `GO` statements.
-3. Transform: each batch is transformed via AST visitor:
-   - Identifies identifier nodes (table, column, CTE names)
-   - Looks up or generates replacement animal-based names
-   - Replaces identifiers in the AST
-4. Emit: transformed SQL is written to stdout with `GO` separators preserved.
-
-Note: parseability of transformed output is covered by automated tests, not by an extra final parse pass in the runtime pipeline.
-
-## Identifier Replacement Strategy
-
-Names are generated from a list of animal names (for example `shark`, `dolphin`, `eagle`). Names are:
-
-- Unique within a script run
-- Deterministic when using `--seed`
-- Safe for T-SQL (no reserved keywords)
-- Unambiguous (same normalized identifier maps to the same replacement)
-
-When the base animal pool is exhausted, suffixed fallback names are generated (for example `lion2`, `lion3`) while still enforcing identifier safety.
-
-### Case and Bracket Normalization
-
-Identifiers in SQL Server are case-insensitive and can be bracketed. The obfuscator:
-
-- Normalizes to lowercase for mapping (`UserId`, `userid`, `USERID` map together)
-- Handles bracketed identifiers correctly
-- Preserves temp table prefixes (`#` / `##`)
-
-### Example
-
-Input:
-
-```sql
-SELECT UserId, UserName FROM Users WHERE Status = 'Active';
-```
-
-Output (example with `seed=42`):
-
-```sql
-SELECT shark, dolphin FROM tiger WHERE eagle = 'Active';
-```
-
-String literal `'Active'` is unchanged.
-
-## Known Limitations
-
-1. Non-standalone `GO`: text such as `GoTable` or `GOING_CONCERN` is not treated as a batch separator.
-2. Dynamic SQL: string literals containing SQL code are not parsed or transformed.
-
-   ```sql
-   EXEC sp_executesql N'SELECT * FROM Users';  -- Users will not be renamed inside the string
-   ```
-
-3. Comments: comment text is not transformed.
-4. Semantic equivalence: obfuscation targets syntactic validity, not semantic meaning.
-5. Formatting: `sqlglot` may normalize SQL formatting/comments during output.
-
-## Guarantee Boundaries
-
-### What Is Guaranteed
-
-- Output is valid, parseable T-SQL for successfully transformed batches.
-- No reserved keywords are generated as identifiers.
-- Same seed produces identical output.
-- Table, column, and CTE identifiers targeted by the transformer are renamed consistently.
-- Schema qualifiers are preserved.
-- Variables, keywords, and string literals are unchanged.
-- Batch structure (`GO` separators) is preserved.
-
-### What Is Not Guaranteed
-
-- Semantic equivalence for all SQL workloads
-- Performance equivalence (execution plans may differ)
-- Application-specific logic relying on identifier names
-
-## Error Handling
-
-Errors are printed to stderr with context. Exit code is `1` on error, `0` on success.
-
-### Error Examples
-
-Missing file:
+Typical workspace contents:
 
 ```text
-$ python obfuscator.py nonexistent.sql
-Error: Input file not found: nonexistent.sql
+script.obf/
+|-- original.sql
+|-- obfuscated.sql
+|-- deobfuscated.sql                    # after deobfuscate/roundtrip
+|-- llm_instructions.md
+|-- mapping.json
+|-- context.json
+|-- integrity.json
+|-- mapping.schema.json
+|-- context.schema.json
+|-- integrity.schema.json
+`-- reports/
+    |-- deobfuscation_report.json       # after deobfuscate/roundtrip
+    |-- coverage_report.txt             # after deobfuscate/roundtrip
+    |-- roundtrip_report.json           # after roundtrip
+    `-- roundtrip_diff.txt              # after roundtrip --diff-report
 ```
 
-Parse error:
+## Integrity Protection
 
-```text
-$ python obfuscator.py broken.sql
-Error: Parse error in batch 2/3:
-  Error: Required keyword: 'this' missing for...
-  SQL: SELECT ((
+Workspace integrity is enforced with SHA-256 checksums in `integrity.json`.
+
+Tracked files:
+
+- `original.sql`
+- `obfuscated.sql`
+- `mapping.json`
+- `context.json`
+
+If checksums do not match, `deobfuscate`, `roundtrip`, and `workspace-info` fail with an integrity error.
+
+## Command Reference
+
+### `obfuscate`
+
+```bash
+python obfuscator.py obfuscate <input.sql> [options]
 ```
+
+Options:
+
+- `--workspace <dir>`: custom workspace path (default: `<input_stem>.obf`)
+- `--dialect <name>`: parser dialect (default: `tsql`)
+- `--seed <int>`: deterministic mapping seed
+- `--pretty` / `--no-pretty`: formatted output on/off (default: `--pretty`)
+- `--strict-go`: accepted but currently no-op (reserved)
+- `--instruction-template <path>`: custom `llm_instructions.md` template
+
+Output:
+
+- Prints obfuscated SQL to stdout
+- Writes sibling output file `<input_stem>_obfuscated<ext>`
+- Writes workspace artifacts
+
+### `deobfuscate`
+
+```bash
+python obfuscator.py deobfuscate --workspace <dir> --input <edited_obfuscated.sql> [options]
+```
+
+Options:
+
+- `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
+- `--dry-run`: analyze and print summary only; does not write output/report files
+
+Dry-run exit behavior:
+
+- `0` when no unknown/ambiguous mappings
+- `1` when unknown/ambiguous mappings are found
+
+### `roundtrip`
+
+```bash
+python obfuscator.py roundtrip <input.sql> [options]
+```
+
+Uses obfuscation options from `obfuscate` (`--workspace`, `--seed`, `--pretty`, etc.).
+
+Additional option:
+
+- `--diff-report`: writes unified diff to `reports/roundtrip_diff.txt`
+
+### `workspace-info`
+
+```bash
+python obfuscator.py workspace-info --workspace <dir>
+```
+
+Prints:
+
+- workspace path
+- dialect/seed/pretty
+- batch/statement/mapping counts
+- integrity algorithm and tracked-file count
+- artifact/report presence flags
+
+## Usage Examples
+
+### Basic Obfuscation
+
+```bash
+python obfuscator.py obfuscate sample_sql/01_simple_select.sql
+```
+
+### Legacy Invocation
+
+```bash
+python obfuscator.py sample_sql/01_simple_select.sql
+```
+
+### Deterministic Obfuscation
+
+```bash
+python obfuscator.py obfuscate sample_sql/02_joins.sql --seed 42
+```
+
+### Compact Output (No Pretty)
+
+```bash
+python obfuscator.py obfuscate sample_sql/06_aggregate_functions.sql --no-pretty
+```
+
+### Custom Workspace Location
+
+```bash
+python obfuscator.py obfuscate sample_sql/03_cte_example.sql --workspace .tmp/ws_cte
+```
+
+### Custom LLM Prompt Template
+
+```bash
+python obfuscator.py obfuscate sample_sql/04_temporary_tables.sql --instruction-template my_llm_prompt.md
+```
+
+### De-obfuscate an LLM-Edited Script
+
+```bash
+python obfuscator.py deobfuscate --workspace sample_sql/06_aggregate_functions.obf --input sample_sql/06_aggregate_functions.obf/llm_response_obfuscated.sql
+```
+
+### De-obfuscate to Specific Output File
+
+```bash
+python obfuscator.py deobfuscate --workspace sample_sql/06_aggregate_functions.obf --input sample_sql/06_aggregate_functions.obf/llm_response_obfuscated.sql --out sample_sql/restored.sql
+```
+
+### De-obfuscation Dry-Run Validation
+
+```bash
+python obfuscator.py deobfuscate --workspace sample_sql/06_aggregate_functions.obf --input sample_sql/06_aggregate_functions.obf/llm_response_obfuscated.sql --dry-run
+```
+
+### Roundtrip Verification
+
+```bash
+python obfuscator.py roundtrip sample_sql/07_multiple_batches.sql
+```
+
+### Roundtrip with Diff Report
+
+```bash
+python obfuscator.py roundtrip sample_sql/07_multiple_batches.sql --diff-report
+```
+
+### Workspace Status and Integrity
+
+```bash
+python obfuscator.py workspace-info --workspace sample_sql/07_multiple_batches.obf
+```
+
+### Redirect Obfuscated Stdout
+
+```bash
+python obfuscator.py obfuscate sample_sql/08_schema_qualified.sql > output.sql
+```
+
+Note: this does not replace workspace/sibling file output; those are still written.
+
+## Recommended LLM Workflow
+
+1. Obfuscate:
+
+```bash
+python obfuscator.py obfuscate script.sql
+```
+
+2. Provide LLM with:
+
+- `script.obf/obfuscated.sql`
+- `script.obf/llm_instructions.md`
+
+3. Save LLM output (example):
+
+- `script.obf/llm_response_obfuscated.sql`
+
+4. Validate first:
+
+```bash
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
+```
+
+5. If clean, de-obfuscate fully:
+
+```bash
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
+```
+
+## Troubleshooting
+
+### Unknown Identifiers
+
+Symptoms:
+
+- `unknown_count > 0` in dry-run output/report.
+
+Meaning:
+
+- LLM likely introduced new identifiers or renamed obfuscated ones.
+
+Actions:
+
+1. Ask LLM to preserve obfuscated identifiers exactly.
+2. Check `unknown_by_kind` in reports for where it happened.
+3. Re-run `--dry-run` before final de-obfuscation.
+
+### Ambiguous Identifiers
+
+Symptoms:
+
+- `ambiguous_count > 0`.
+
+Meaning:
+
+- Scope/alias rewrites made reverse mapping non-unique.
+
+Actions:
+
+1. Ask LLM to keep alias/table structure closer to input.
+2. Avoid unnecessary alias rewrites.
+3. Re-validate with `--dry-run`.
+
+### Integrity Check Failed
+
+Symptoms:
+
+- Error includes checksum mismatch for a workspace artifact.
+
+Meaning:
+
+- One protected workspace file changed after creation.
+
+Actions:
+
+1. Restore workspace from trusted copy, or
+2. Re-obfuscate to generate a fresh workspace and retry workflow.
+
+## Notes and Limits
+
+- `--strict-go` is currently reserved and does not change behavior yet.
+- Comments/formatting can change due to SQL regeneration (`sqlglot` output style).
+- The tool targets identifier round-trip behavior, not byte-for-byte source reconstruction.
 
 ## Development
 
-### Running Tests
+Run tests:
 
 ```bash
-pytest                          # All tests
-pytest -v                       # Verbose
-pytest tests/test_cli.py        # Specific file
-pytest -k "test_determinism"    # Matching pattern
+pytest
 ```
 
-### Project Structure
+Run a subset:
 
-```text
-sql-obfuscator/
-|-- src/sql_obfuscator/
-|   |-- __init__.py
-|   |-- cli.py                 # CLI entry point
-|   |-- pipeline.py            # Main obfuscation pipeline
-|   |-- transformer.py         # AST transformation logic
-|   |-- registry.py            # Identifier mapping registry
-|   |-- names.py               # Name generation and validation
-|   |-- go_batches.py          # GO statement splitting
-|   |-- errors.py              # Custom exception types
-|   `-- *.txt                  # Data files (keywords, animals)
-|-- tests/
-|   |-- test_*.py
-|   `-- conftest.py
-`-- README.md
+```bash
+pytest tests/test_cli.py -q
+pytest tests/test_deobfuscation.py -q
+pytest tests/test_llm_workflow_integration.py -q
 ```
-
-### Test Coverage
-
-The current suite contains 70+ test functions across CLI, parsing/batches, transformation, identifier safety, determinism, and output parseability scenarios.
-
-## License
-
-See LICENSE file (if present).

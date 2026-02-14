@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlglot import parse
 from sqlglot.errors import ParseError
 
@@ -55,10 +57,21 @@ def _process_batch(
             exc, batch_sql, batch_number, total_batches)
         raise ParseScriptError(error_msg) from exc
 
-    transformed = transform_statements(statements, registry=registry)
+    transformed = transform_statements(
+        statements,
+        registry=registry,
+        batch_index=batch_number,
+    )
     return ";\n".join(
         stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed
     )
+
+
+@dataclass
+class ObfuscationResult:
+    output_sql: str
+    mapping_payload: dict
+    context_payload: dict
 
 
 def obfuscate_sql(
@@ -69,10 +82,29 @@ def obfuscate_sql(
     strict_go: bool = False,
     pretty: bool = True,
 ) -> str:
+    result = obfuscate_sql_with_metadata(
+        script,
+        dialect=dialect,
+        seed=seed,
+        strict_go=strict_go,
+        pretty=pretty,
+    )
+    return result.output_sql
+
+
+def obfuscate_sql_with_metadata(
+    script: str,
+    *,
+    dialect: str = "tsql",
+    seed: int | None = None,
+    strict_go: bool = False,
+    pretty: bool = True,
+) -> ObfuscationResult:
     del strict_go  # reserved for future strict GO edge-case handling
     registry = IdentifierRegistry(seed=seed)
     batches = split_batches(script)
     transformed_batches = []
+    total_statements = 0
     for batch_idx, batch in enumerate(batches, start=1):
         transformed_batch = _process_batch(
             batch,
@@ -83,4 +115,22 @@ def obfuscate_sql(
             total_batches=len(batches),
         )
         transformed_batches.append(transformed_batch)
-    return join_batches(transformed_batches)
+        if batch.strip():
+            total_statements += len(parse(batch, dialect=dialect))
+
+    output_sql = join_batches(transformed_batches)
+    mapping_payload = registry.mapping_payload()
+    context_payload = {
+        "schema_version": 1,
+        "dialect": dialect,
+        "seed": seed,
+        "pretty": pretty,
+        "batch_count": len(batches),
+        "statement_count": total_statements,
+        "mapping_entry_count": len(mapping_payload["entries"]),
+    }
+    return ObfuscationResult(
+        output_sql=output_sql,
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+    )

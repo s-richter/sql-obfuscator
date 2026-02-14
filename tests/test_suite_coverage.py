@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import re
 import pytest
 
 from sql_obfuscator.errors import ParseScriptError
@@ -29,7 +30,9 @@ class TestPositiveTests:
         assert "TableA" not in result
         assert "TableB" not in result
         # Aliases should be present but not the original single-letter aliases
-        assert " AS " in result and "a." not in result and "b." not in result
+        assert " AS " in result
+        assert re.search(r"\ba\.", result, re.IGNORECASE) is None
+        assert re.search(r"\bb\.", result, re.IGNORECASE) is None
 
     def test_temp_table_single_hash(self):
         """Single # temp tables should preserve temp marker."""
@@ -286,3 +289,5 @@ class TestComplexScenarios:
         assert "@Status" in result
         # Table name should be renamed
         assert "Users" not in result or result.count("Users") == 0
+
+

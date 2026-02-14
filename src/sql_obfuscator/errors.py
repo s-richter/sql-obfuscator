@@ -8,3 +8,7 @@ class InputFileError(ObfuscatorError):
 
 class ParseScriptError(ObfuscatorError):
     """Raised when SQL parsing fails."""
+
+
+class WorkspaceError(ObfuscatorError):
+    """Raised when workspace artifacts cannot be persisted or loaded."""
