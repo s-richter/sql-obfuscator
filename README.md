@@ -18,3 +18,17 @@ python obfuscator.py path/to/script.sql
 pip install -e .[dev]
 pytest
 ```
+
+## Git Automation Command
+
+Run:
+
+```powershell
+./scripts/git_auto_sync.ps1
+```
+
+Dry-run mode (no commit/push):
+
+```powershell
+./scripts/git_auto_sync.ps1 -DryRun
+```

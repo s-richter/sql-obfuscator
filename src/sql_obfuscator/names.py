@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
-ANIMALS = [
-    "cat",
-    "dog",
-    "mouse",
-    "lion",
-    "tiger",
-    "wolf",
-    "bear",
-    "eagle",
-    "fox",
-    "otter",
-]
+def _load_animals() -> list[str]:
+    path = Path(__file__).with_name("identifier_replacements.txt")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise RuntimeError(f"Unable to load identifier replacements from: {path}") from exc
+
+    animals = [line.strip() for line in lines if line.strip()]
+    if not animals:
+        raise RuntimeError(f"Identifier replacements file is empty: {path}")
+    return animals
+
+
+ANIMALS = _load_animals()
 
 
 class AnimalNameProvider:
