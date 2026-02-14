@@ -40,7 +40,11 @@ pip install -e .[dev]
 python obfuscator.py script.sql
 ```
 
-Output is printed to stdout. Redirects are supported:
+Output is printed to stdout and also written to a sibling file named `<original>_obfuscated.sql`.
+
+Example: `script.sql` writes `script_obfuscated.sql`.
+
+Redirects are still supported:
 
 ```bash
 python obfuscator.py input.sql > output.sql
