@@ -9,14 +9,50 @@ from .registry import IdentifierRegistry
 from .transformer import transform_statements
 
 
-def _process_batch(batch_sql: str, *, dialect: str, registry: IdentifierRegistry) -> str:
+def _extract_context_snippet(sql: str, max_length: int = 100) -> str:
+    """Extract a snippet of SQL for error context."""
+    snippet = sql.strip()
+    if len(snippet) > max_length:
+        snippet = snippet[:max_length] + "..."
+    return snippet
+
+
+def _format_parse_error(
+    error: ParseError,
+    batch_sql: str,
+    batch_number: int,
+    total_batches: int,
+) -> str:
+    """Format a parse error with context."""
+    lines = [
+        f"Parse error in batch {batch_number}/{total_batches}:",
+        f"  Error: {error}",
+    ]
+
+    # Add SQL snippet for context
+    snippet = _extract_context_snippet(batch_sql)
+    lines.append(f"  SQL: {snippet}")
+
+    return "\n".join(lines)
+
+
+def _process_batch(
+    batch_sql: str,
+    *,
+    dialect: str,
+    registry: IdentifierRegistry,
+    batch_number: int = 1,
+    total_batches: int = 1,
+) -> str:
     if not batch_sql.strip():
         return batch_sql
 
     try:
         statements = parse(batch_sql, dialect=dialect)
     except ParseError as exc:
-        raise ParseScriptError(str(exc)) from exc
+        error_msg = _format_parse_error(
+            exc, batch_sql, batch_number, total_batches)
+        raise ParseScriptError(error_msg) from exc
 
     transformed = transform_statements(statements, registry=registry)
     return ";\n".join(stmt.sql(dialect=dialect) for stmt in transformed)
@@ -32,7 +68,14 @@ def obfuscate_sql(
     del strict_go  # reserved for future strict GO edge-case handling
     registry = IdentifierRegistry(seed=seed)
     batches = split_batches(script)
-    transformed_batches = [
-        _process_batch(batch, dialect=dialect, registry=registry) for batch in batches
-    ]
+    transformed_batches = []
+    for batch_idx, batch in enumerate(batches, start=1):
+        transformed_batch = _process_batch(
+            batch,
+            dialect=dialect,
+            registry=registry,
+            batch_number=batch_idx,
+            total_batches=len(batches),
+        )
+        transformed_batches.append(transformed_batch)
     return join_batches(transformed_batches)
