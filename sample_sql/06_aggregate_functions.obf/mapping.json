@@ -1,0 +1,585 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "normalized_original": "avgorderamount",
+      "temp_prefix": "",
+      "original_lexeme": "AvgOrderAmount",
+      "original_unbracketed": "AvgOrderAmount",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "peacock",
+      "obfuscated_lexeme": "peacock",
+      "occurrences": [
+        {
+          "kind": "column_alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.alias.expressions",
+          "parent_kind": "select",
+          "role": "projection_alias"
+        }
+      ]
+    },
+    {
+      "normalized_original": "city",
+      "temp_prefix": "",
+      "original_lexeme": "City",
+      "original_unbracketed": "City",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "fox",
+      "obfuscated_lexeme": "fox",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "select",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "firstorderdate",
+      "temp_prefix": "",
+      "original_lexeme": "FirstOrderDate",
+      "original_unbracketed": "FirstOrderDate",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "rabbit",
+      "obfuscated_lexeme": "rabbit",
+      "occurrences": [
+        {
+          "kind": "column_alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.alias.expressions",
+          "parent_kind": "select",
+          "role": "projection_alias"
+        }
+      ]
+    },
+    {
+      "normalized_original": "lastorderdate",
+      "temp_prefix": "",
+      "original_lexeme": "LastOrderDate",
+      "original_unbracketed": "LastOrderDate",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "octopus",
+      "obfuscated_lexeme": "octopus",
+      "occurrences": [
+        {
+          "kind": "column_alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.alias.expressions",
+          "parent_kind": "select",
+          "role": "projection_alias"
+        }
+      ]
+    },
+    {
+      "normalized_original": "o",
+      "temp_prefix": "",
+      "original_lexeme": "o",
+      "original_unbracketed": "o",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "heron",
+      "obfuscated_lexeme": "heron",
+      "occurrences": [
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "distinct",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "sum",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "avg",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "min",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "max",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.tablealias.alias",
+          "parent_kind": "table",
+          "role": "table_alias"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expression",
+          "parent_kind": "eq",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "gte",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "distinct",
+          "role": "column_qualifier"
+        }
+      ]
+    },
+    {
+      "normalized_original": "orderdate",
+      "temp_prefix": "",
+      "original_lexeme": "OrderDate",
+      "original_unbracketed": "OrderDate",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "bison",
+      "obfuscated_lexeme": "bison",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "min",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "max",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "gte",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "orderid",
+      "temp_prefix": "",
+      "original_lexeme": "OrderId",
+      "original_unbracketed": "OrderId",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "beaver",
+      "obfuscated_lexeme": "beaver",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "distinct",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "distinct",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "orders",
+      "temp_prefix": "",
+      "original_lexeme": "Orders",
+      "original_unbracketed": "Orders",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "newt",
+      "obfuscated_lexeme": "newt",
+      "occurrences": [
+        {
+          "kind": "table",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.table.this",
+          "parent_kind": "join",
+          "role": "table_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "ordertotal",
+      "temp_prefix": "",
+      "original_lexeme": "OrderTotal",
+      "original_unbracketed": "OrderTotal",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "gecko",
+      "obfuscated_lexeme": "gecko",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "sum",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "avg",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "status",
+      "temp_prefix": "",
+      "original_lexeme": "Status",
+      "original_unbracketed": "Status",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "finch",
+      "obfuscated_lexeme": "finch",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "eq",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "totalamount",
+      "temp_prefix": "",
+      "original_lexeme": "TotalAmount",
+      "original_unbracketed": "TotalAmount",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "horse",
+      "obfuscated_lexeme": "horse",
+      "occurrences": [
+        {
+          "kind": "column_alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.alias.expressions",
+          "parent_kind": "select",
+          "role": "projection_alias"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "ordered",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "totalorders",
+      "temp_prefix": "",
+      "original_lexeme": "TotalOrders",
+      "original_unbracketed": "TotalOrders",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "goat",
+      "obfuscated_lexeme": "goat",
+      "occurrences": [
+        {
+          "kind": "column_alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.alias.expressions",
+          "parent_kind": "select",
+          "role": "projection_alias"
+        }
+      ]
+    },
+    {
+      "normalized_original": "u",
+      "temp_prefix": "",
+      "original_lexeme": "u",
+      "original_unbracketed": "u",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "raccoon",
+      "obfuscated_lexeme": "raccoon",
+      "occurrences": [
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "select",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "select",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.tablealias.alias",
+          "parent_kind": "table",
+          "role": "table_alias"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "eq",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "eq",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_qualifier"
+        },
+        {
+          "kind": "alias",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_qualifier"
+        }
+      ]
+    },
+    {
+      "normalized_original": "userid",
+      "temp_prefix": "",
+      "original_lexeme": "UserId",
+      "original_unbracketed": "UserId",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "lynx",
+      "obfuscated_lexeme": "lynx",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.this",
+          "parent_kind": "eq",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expression",
+          "parent_kind": "eq",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "username",
+      "temp_prefix": "",
+      "original_lexeme": "UserName",
+      "original_unbracketed": "UserName",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "jay",
+      "obfuscated_lexeme": "jay",
+      "occurrences": [
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "select",
+          "role": "column_reference"
+        },
+        {
+          "kind": "column",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.column.expressions",
+          "parent_kind": "group",
+          "role": "column_reference"
+        }
+      ]
+    },
+    {
+      "normalized_original": "users",
+      "temp_prefix": "",
+      "original_lexeme": "Users",
+      "original_unbracketed": "Users",
+      "original_was_bracketed": false,
+      "obfuscated_unbracketed": "ant",
+      "obfuscated_lexeme": "ant",
+      "occurrences": [
+        {
+          "kind": "table",
+          "batch_index": 1,
+          "statement_index": 1,
+          "scope_id": "b1.s1.table.this",
+          "parent_kind": "from",
+          "role": "table_reference"
+        }
+      ]
+    }
+  ],
+  "forward_index": {
+    "avgorderamount": "peacock",
+    "city": "fox",
+    "firstorderdate": "rabbit",
+    "lastorderdate": "octopus",
+    "o": "heron",
+    "orderdate": "bison",
+    "orderid": "beaver",
+    "orders": "newt",
+    "ordertotal": "gecko",
+    "status": "finch",
+    "totalamount": "horse",
+    "totalorders": "goat",
+    "u": "raccoon",
+    "userid": "lynx",
+    "username": "jay",
+    "users": "ant"
+  },
+  "reverse_index": {
+    "peacock": {
+      "normalized_original": "avgorderamount",
+      "temp_prefix": ""
+    },
+    "fox": {
+      "normalized_original": "city",
+      "temp_prefix": ""
+    },
+    "rabbit": {
+      "normalized_original": "firstorderdate",
+      "temp_prefix": ""
+    },
+    "octopus": {
+      "normalized_original": "lastorderdate",
+      "temp_prefix": ""
+    },
+    "heron": {
+      "normalized_original": "o",
+      "temp_prefix": ""
+    },
+    "bison": {
+      "normalized_original": "orderdate",
+      "temp_prefix": ""
+    },
+    "beaver": {
+      "normalized_original": "orderid",
+      "temp_prefix": ""
+    },
+    "newt": {
+      "normalized_original": "orders",
+      "temp_prefix": ""
+    },
+    "gecko": {
+      "normalized_original": "ordertotal",
+      "temp_prefix": ""
+    },
+    "finch": {
+      "normalized_original": "status",
+      "temp_prefix": ""
+    },
+    "horse": {
+      "normalized_original": "totalamount",
+      "temp_prefix": ""
+    },
+    "goat": {
+      "normalized_original": "totalorders",
+      "temp_prefix": ""
+    },
+    "raccoon": {
+      "normalized_original": "u",
+      "temp_prefix": ""
+    },
+    "lynx": {
+      "normalized_original": "userid",
+      "temp_prefix": ""
+    },
+    "jay": {
+      "normalized_original": "username",
+      "temp_prefix": ""
+    },
+    "ant": {
+      "normalized_original": "users",
+      "temp_prefix": ""
+    }
+  }
+}

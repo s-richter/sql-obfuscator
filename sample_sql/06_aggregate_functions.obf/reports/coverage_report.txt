@@ -1,0 +1,9 @@
+mapped_identifiers: 40
+unknown_count: 0
+ambiguous_count: 0
+batch_count: 1
+statement_count: 1
+unknown_by_kind: {}
+ambiguous_by_kind: {}
+recommendations:
+- No unresolved identifiers detected.

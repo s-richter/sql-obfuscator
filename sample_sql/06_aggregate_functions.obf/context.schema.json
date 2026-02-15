@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SQL Obfuscator Context Schema",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "input_file",
+    "dialect",
+    "pretty",
+    "batch_count",
+    "statement_count",
+    "mapping_entry_count"
+  ]
+}
