@@ -1,9 +1,1 @@
-colorama==0.4.6
-iniconfig==2.3.0
-packaging==26.0
-pluggy==1.6.0
-pycodestyle==2.14.0
-Pygments==2.19.2
-pytest==9.0.2
--e git+https://github.com/s-richter/sql-obfuscator.git@c44884e61629cc7362184c10d1423beff35522c7#egg=sql_obfuscator
-sqlglot==28.10.1
+sqlglot>=28,<29

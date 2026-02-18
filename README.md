@@ -22,6 +22,12 @@ For development:
 pip install -e .[dev]
 ```
 
+Optional fallback (runtime dependency only):
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Cheat Sheet
 
 ```bash
@@ -370,3 +376,4 @@ pytest tests/test_cli.py -q
 pytest tests/test_deobfuscation.py -q
 pytest tests/test_llm_workflow_integration.py -q
 ```
+
