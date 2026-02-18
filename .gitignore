@@ -64,3 +64,8 @@ ENV/
 Thumbs.db
 Desktop.ini
 
+# generated files
+*.obf/
+*_obfuscated.sql
+
+
