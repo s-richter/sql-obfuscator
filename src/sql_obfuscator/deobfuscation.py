@@ -102,9 +102,15 @@ def _raw_table_name(identifier: exp.Identifier) -> str:
 
 
 def _set_identifier(identifier: exp.Identifier, original: _ReverseEntry) -> None:
-    identifier.set("this", original.original_unbracketed)
+    identifier.set("this", _strip_temp_prefix(original.original_unbracketed, original.temp_prefix))
     if original.original_was_bracketed:
         identifier.set("quoted", True)
+
+
+def _strip_temp_prefix(value: str, temp_prefix: str) -> str:
+    if temp_prefix and value.startswith(temp_prefix):
+        return value[len(temp_prefix):]
+    return value
 
 
 def _record_unknown(

@@ -73,7 +73,7 @@ class IdentifierRegistry:
             self._entries[key] = MappingEntry(
                 key=key,
                 original_lexeme=original,
-                original_unbracketed=_strip_outer_brackets(original),
+                original_unbracketed=_original_without_temp_prefix(original, key.temp_prefix),
                 original_was_bracketed=_is_bracketed(original),
                 obfuscated_unbracketed=self._map[key],
                 occurrences=[],
@@ -143,3 +143,10 @@ def _strip_outer_brackets(value: str) -> str:
     if _is_bracketed(value):
         return value[1:-1]
     return value
+
+
+def _original_without_temp_prefix(value: str, temp_prefix: str) -> str:
+    unbracketed = _strip_outer_brackets(value)
+    if temp_prefix and unbracketed.startswith(temp_prefix):
+        return unbracketed[len(temp_prefix):]
+    return unbracketed

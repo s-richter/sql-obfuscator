@@ -47,3 +47,59 @@ def test_deobfuscate_reports_unknown_identifiers():
     assert report["unknown_by_kind"]
     assert "recommendations" in report
     assert len(report["recommendations"]) > 0
+
+
+def test_deobfuscate_roundtrip_preserves_single_hash_temp_table():
+    original_sql = """
+    CREATE TABLE #TempOrders (OrderId INT);
+    INSERT INTO #TempOrders VALUES (1);
+    SELECT * FROM #TempOrders;
+    DROP TABLE #TempOrders;
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=123, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "#TempOrders" in deobfuscated_sql
+    assert "##TempOrders" not in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+
+    temp_entry = next(
+        entry
+        for entry in obfuscated.mapping_payload["entries"]
+        if entry["normalized_original"] == "temporders" and entry["temp_prefix"] == "#"
+    )
+    assert temp_entry["original_unbracketed"] == "TempOrders"
+
+
+def test_deobfuscate_roundtrip_preserves_global_temp_table_prefix():
+    original_sql = """
+    CREATE TABLE ##GlobalQueue (Id INT);
+    INSERT INTO ##GlobalQueue VALUES (1);
+    SELECT * FROM ##GlobalQueue;
+    DROP TABLE ##GlobalQueue;
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=321, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "##GlobalQueue" in deobfuscated_sql
+    assert "###GlobalQueue" not in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+
+    temp_entry = next(
+        entry
+        for entry in obfuscated.mapping_payload["entries"]
+        if entry["normalized_original"] == "globalqueue" and entry["temp_prefix"] == "##"
+    )
+    assert temp_entry["original_unbracketed"] == "GlobalQueue"
