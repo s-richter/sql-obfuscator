@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from sql_obfuscator.cli import main
@@ -249,6 +250,15 @@ def test_cli_roundtrip_subcommand_works(tmp_path: Path, capsys):
     assert (workspace / "deobfuscated.sql").exists()
     assert (workspace / "reports" / "deobfuscation_report.json").exists()
     assert (workspace / "reports" / "roundtrip_report.json").exists()
+    assert (workspace / "reports" / "original_pretty.sql").exists()
+    assert (workspace / "reports" / "deobfuscated_pretty.sql").exists()
+    assert (workspace / "reports" / "roundtrip_normalized_diff.txt").exists()
+
+    roundtrip_report = json.loads(
+        (workspace / "reports" / "roundtrip_report.json").read_text(encoding="utf-8")
+    )
+    assert "normalized_exact_match" in roundtrip_report
+    assert "normalized_diff_line_count" in roundtrip_report
 
 
 def test_cli_roundtrip_diff_report_file(tmp_path: Path, capsys):
@@ -291,6 +301,9 @@ def test_cli_workspace_info_subcommand(tmp_path: Path, capsys):
     assert "workspace:" in captured.out
     assert "mapping entries:" in captured.out
     assert "llm_instructions.md: yes" in captured.out
+    assert "reports/original_pretty.sql: yes" in captured.out
+    assert "reports/deobfuscated_pretty.sql: yes" in captured.out
+    assert "reports/roundtrip_normalized_diff.txt: yes" in captured.out
 
 
 def test_cli_workspace_info_missing_workspace(tmp_path: Path, capsys):

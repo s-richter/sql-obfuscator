@@ -114,7 +114,10 @@ script.obf/
     |-- deobfuscation_report.json       # after deobfuscate/roundtrip
     |-- coverage_report.txt             # after deobfuscate/roundtrip
     |-- roundtrip_report.json           # after roundtrip
-    `-- roundtrip_diff.txt              # after roundtrip --diff-report
+    |-- roundtrip_diff.txt              # after roundtrip --diff-report
+    |-- original_pretty.sql             # normalized with sqlglot pretty formatting
+    |-- deobfuscated_pretty.sql         # normalized with sqlglot pretty formatting
+    `-- roundtrip_normalized_diff.txt   # diff of the normalized pair above
 ```
 
 ## Integrity Protection
@@ -180,6 +183,14 @@ Uses obfuscation options from `obfuscate` (`--workspace`, `--seed`, `--pretty`, 
 Additional option:
 
 - `--diff-report`: writes unified diff to `reports/roundtrip_diff.txt`
+
+Roundtrip always writes a normalized comparison set:
+
+- `reports/original_pretty.sql`
+- `reports/deobfuscated_pretty.sql`
+- `reports/roundtrip_normalized_diff.txt`
+
+`roundtrip_report.json` includes both raw and normalized match metrics.
 
 ### `workspace-info`
 

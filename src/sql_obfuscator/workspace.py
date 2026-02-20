@@ -183,6 +183,9 @@ def save_roundtrip_reports(
     workspace_path: Path,
     report_payload: dict[str, Any],
     diff_text: str | None = None,
+    original_pretty_sql: str | None = None,
+    deobfuscated_pretty_sql: str | None = None,
+    normalized_diff_text: str | None = None,
 ) -> None:
     reports_path = workspace_path / "reports"
     try:
@@ -193,6 +196,12 @@ def save_roundtrip_reports(
     _write_json(reports_path / "roundtrip_report.json", report_payload)
     if diff_text is not None:
         _write_text(reports_path / "roundtrip_diff.txt", diff_text)
+    if original_pretty_sql is not None:
+        _write_text(reports_path / "original_pretty.sql", original_pretty_sql)
+    if deobfuscated_pretty_sql is not None:
+        _write_text(reports_path / "deobfuscated_pretty.sql", deobfuscated_pretty_sql)
+    if normalized_diff_text is not None:
+        _write_text(reports_path / "roundtrip_normalized_diff.txt", normalized_diff_text)
 
 
 def _write_text(path: Path, content: str) -> None:

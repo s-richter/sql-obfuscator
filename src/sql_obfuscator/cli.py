@@ -5,8 +5,12 @@ import difflib
 import sys
 from pathlib import Path
 
+from sqlglot import parse
+from sqlglot.errors import ParseError
+
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
+from .go_batches import join_batches, split_batches
 from .pipeline import obfuscate_sql_with_metadata
 from .workspace import (
     default_workspace_path,
@@ -156,6 +160,17 @@ def _read_optional_template(path: str | None) -> str | None:
         raise InputFileError(f"Unable to read instruction template: {template_path}") from exc
 
 
+def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
+    normalized_batches: list[str] = []
+    for batch in split_batches(sql_text):
+        if not batch.strip():
+            normalized_batches.append(batch)
+            continue
+        statements = parse(batch, dialect=dialect)
+        normalized_batches.append(";\n".join(stmt.sql(dialect=dialect, pretty=True) for stmt in statements))
+    return join_batches(normalized_batches)
+
+
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
     input_path = Path(args.sql_file)
     sql_text = _read_sql_file(input_path)
@@ -274,18 +289,42 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
             tofile="deobfuscated.sql",
         )
     )
+
+    dialect = context_payload.get("dialect", "tsql")
+    try:
+        original_pretty_sql = _normalize_sql_for_comparison(original_sql, dialect=dialect)
+        deobfuscated_pretty_sql = _normalize_sql_for_comparison(deobfuscated_sql, dialect=dialect)
+    except ParseError as exc:
+        raise ParseScriptError(f"Parse error while building normalized roundtrip comparison: {exc}") from exc
+
+    normalized_diff_lines = list(
+        difflib.unified_diff(
+            original_pretty_sql.splitlines(keepends=True),
+            deobfuscated_pretty_sql.splitlines(keepends=True),
+            fromfile="reports/original_pretty.sql",
+            tofile="reports/deobfuscated_pretty.sql",
+        )
+    )
+
     roundtrip_report = {
         "schema_version": 1,
         "exact_match": original_sql == deobfuscated_sql,
         "original_char_count": len(original_sql),
         "deobfuscated_char_count": len(deobfuscated_sql),
         "diff_line_count": len(diff_lines),
+        "normalized_exact_match": original_pretty_sql == deobfuscated_pretty_sql,
+        "normalized_original_char_count": len(original_pretty_sql),
+        "normalized_deobfuscated_char_count": len(deobfuscated_pretty_sql),
+        "normalized_diff_line_count": len(normalized_diff_lines),
         "deobfuscation_report": deobfuscation_report,
     }
     save_roundtrip_reports(
         workspace_path=workspace_path,
         report_payload=roundtrip_report,
         diff_text="".join(diff_lines) if args.diff_report else None,
+        original_pretty_sql=original_pretty_sql,
+        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
+        normalized_diff_text="".join(normalized_diff_lines),
     )
 
     print(deobfuscated_sql)
@@ -312,6 +351,9 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     roundtrip_report_path = reports_path / "roundtrip_report.json"
     coverage_report_path = reports_path / "coverage_report.txt"
     roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
+    original_pretty_path = reports_path / "original_pretty.sql"
+    deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
+    roundtrip_normalized_diff_path = reports_path / "roundtrip_normalized_diff.txt"
 
     mapping_payload = load_mapping_payload(mapping_path)
     context_payload = load_context_payload(context_path)
@@ -337,6 +379,9 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/roundtrip_report.json: {'yes' if roundtrip_report_path.exists() else 'no'}",
         f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
         f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
+        f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
+        f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",
+        f"reports/roundtrip_normalized_diff.txt: {'yes' if roundtrip_normalized_diff_path.exists() else 'no'}",
     ]
     print("\n".join(lines))
     return 0
