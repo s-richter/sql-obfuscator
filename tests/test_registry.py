@@ -41,3 +41,20 @@ def test_registry_mapping_payload_includes_occurrences():
     assert entry["occurrences"][0]["kind"] == "table"
     assert payload["forward_index"]["users"] == entry["obfuscated_lexeme"]
     assert payload["reverse_index"][entry["obfuscated_lexeme"]]["normalized_original"] == "users"
+
+
+def test_registry_occurrence_includes_optional_type_lexeme():
+    registry = IdentifierRegistry(seed=7)
+    registry.get_or_create(
+        "OrderTotal",
+        kind="column_def",
+        batch_index=1,
+        statement_index=1,
+        scope_id="b1.s1.columndef.expressions",
+        parent_kind="schema",
+        role="column_definition",
+        type_lexeme="DECIMAL",
+    )
+    payload = registry.mapping_payload()
+    occurrence = payload["entries"][0]["occurrences"][0]
+    assert occurrence["type_lexeme"] == "DECIMAL"

@@ -19,6 +19,7 @@ class MappingOccurrence:
     scope_id: str
     parent_kind: str
     role: str
+    type_lexeme: str | None = None
 
 
 @dataclass
@@ -65,6 +66,7 @@ class IdentifierRegistry:
         scope_id: str = "",
         parent_kind: str = "",
         role: str = "",
+        type_lexeme: str | None = None,
     ) -> str:
         key = normalize_identifier(raw_identifier)
         if key not in self._map:
@@ -87,6 +89,7 @@ class IdentifierRegistry:
                 scope_id=scope_id,
                 parent_kind=parent_kind,
                 role=role,
+                type_lexeme=type_lexeme,
             )
         )
         return f"{key.temp_prefix}{self._map[key]}"
@@ -122,6 +125,11 @@ class IdentifierRegistry:
                             "scope_id": occ.scope_id,
                             "parent_kind": occ.parent_kind,
                             "role": occ.role,
+                            **(
+                                {"type_lexeme": occ.type_lexeme}
+                                if occ.type_lexeme is not None
+                                else {}
+                            ),
                         }
                         for occ in entry.occurrences
                     ],

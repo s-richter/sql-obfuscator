@@ -61,6 +61,8 @@ def _process_batch(
         statements,
         registry=registry,
         batch_index=batch_number,
+        batch_sql=batch_sql,
+        dialect=dialect,
     )
     return ";\n".join(
         stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed

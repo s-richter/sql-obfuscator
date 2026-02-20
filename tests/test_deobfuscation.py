@@ -103,3 +103,42 @@ def test_deobfuscate_roundtrip_preserves_global_temp_table_prefix():
         if entry["normalized_original"] == "globalqueue" and entry["temp_prefix"] == "##"
     )
     assert temp_entry["original_unbracketed"] == "GlobalQueue"
+
+
+def test_deobfuscate_roundtrip_preserves_decimal_type_lexeme():
+    original_sql = """
+    CREATE TABLE #TempOrders (
+      OrderTotal DECIMAL(10, 2)
+    );
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=77, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "OrderTotal DECIMAL(10, 2)" in deobfuscated_sql
+    assert "OrderTotal NUMERIC(10, 2)" not in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+
+
+def test_deobfuscate_roundtrip_preserves_numeric_type_lexeme():
+    original_sql = """
+    CREATE TABLE #TempOrders (
+      OrderTotal NUMERIC(10, 2)
+    );
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=88, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "OrderTotal NUMERIC(10, 2)" in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0

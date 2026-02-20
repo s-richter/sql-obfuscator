@@ -308,6 +308,12 @@ def _validate_mapping_payload(payload: dict[str, Any], *, source: Path) -> None:
                         f"occurrence {occ_idx} in mapping entry {idx} missing/invalid "
                         f"field '{field}' in {source}"
                     )
+            type_lexeme = occurrence.get("type_lexeme")
+            if type_lexeme is not None and not isinstance(type_lexeme, str):
+                raise WorkspaceError(
+                    f"occurrence {occ_idx} in mapping entry {idx} has invalid "
+                    f"field 'type_lexeme' in {source}"
+                )
 
     for key, value in forward_index.items():
         if not isinstance(key, str) or not isinstance(value, str):

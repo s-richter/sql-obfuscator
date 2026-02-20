@@ -155,7 +155,7 @@ def _resolve_and_apply(
     kind: str,
     batch_index: int,
     statement_index: int,
-) -> None:
+) -> _ReverseEntry | None:
     resolved = resolver.resolve(
         obfuscated_lexeme,
         kind=kind,
@@ -181,9 +181,10 @@ def _resolve_and_apply(
                 batch_index=batch_index,
                 statement_index=statement_index,
             )
-        return
+        return None
     _set_identifier(identifier, resolved)
     report["mapped_identifiers"] += 1
+    return resolved
 
 
 def _transform_statement(
@@ -292,7 +293,7 @@ def _transform_statement(
 
         if isinstance(node, exp.ColumnDef):
             if isinstance(node.this, exp.Identifier):
-                _resolve_and_apply(
+                resolved = _resolve_and_apply(
                     resolver,
                     report=report,
                     identifier=node.this,
@@ -301,6 +302,13 @@ def _transform_statement(
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
+                if resolved is not None:
+                    _restore_column_def_type_lexeme(
+                        node,
+                        resolved,
+                        batch_index=batch_index,
+                        statement_index=statement_index,
+                    )
             return node
 
         if isinstance(node, exp.Schema):
@@ -322,6 +330,48 @@ def _transform_statement(
         return node
 
     return statement.transform(_transform, copy=True)
+
+
+def _restore_column_def_type_lexeme(
+    column_def: exp.ColumnDef,
+    resolved: _ReverseEntry,
+    *,
+    batch_index: int,
+    statement_index: int,
+) -> None:
+    kind = column_def.args.get("kind")
+    if not isinstance(kind, exp.DataType):
+        return
+
+    type_lexeme = _find_type_lexeme(
+        resolved,
+        batch_index=batch_index,
+        statement_index=statement_index,
+    )
+    if not type_lexeme:
+        return
+    kind.set("this", type_lexeme)
+
+
+def _find_type_lexeme(
+    resolved: _ReverseEntry,
+    *,
+    batch_index: int,
+    statement_index: int,
+) -> str | None:
+    for occurrence in resolved.occurrences:
+        if not isinstance(occurrence, dict):
+            continue
+        if occurrence.get("kind") != "column_def":
+            continue
+        if occurrence.get("batch_index") != batch_index:
+            continue
+        if occurrence.get("statement_index") != statement_index:
+            continue
+        value = occurrence.get("type_lexeme")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def deobfuscate_sql_with_report(

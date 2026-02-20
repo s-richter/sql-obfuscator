@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from sqlglot import exp
+from sqlglot import Tokenizer, exp
 from sqlglot.expressions import Expression
 
 from .registry import IdentifierRegistry
@@ -213,17 +213,20 @@ def _rename_column_def(
     *,
     batch_index: int,
     statement_index: int,
+    type_lexemes_by_start: dict[int, str],
 ) -> exp.ColumnDef:
     context = _node_context(column_def, batch_index=batch_index, statement_index=statement_index)
     identifier = column_def.this
     if not isinstance(identifier, exp.Identifier):
         return column_def
+    type_lexeme = _column_def_type_lexeme(column_def, type_lexemes_by_start)
     identifier.set(
         "this",
         registry.get_or_create(
             identifier.name,
             kind="column_def",
             role="column_definition",
+            type_lexeme=type_lexeme,
             **context,
         ),
     )
@@ -255,9 +258,15 @@ def _rename_insert_column_list(
 
 
 def transform_statements(
-    statements: Sequence[Expression], *, registry: IdentifierRegistry, batch_index: int
+    statements: Sequence[Expression],
+    *,
+    registry: IdentifierRegistry,
+    batch_index: int,
+    batch_sql: str,
+    dialect: str,
 ) -> list[Expression]:
     transformed: list[Expression] = []
+    type_lexemes_by_start = _column_type_lexemes_by_start(batch_sql, dialect=dialect)
 
     for statement_index, statement in enumerate(statements, start=1):
         def _transform(node: Expression) -> Expression:
@@ -302,6 +311,7 @@ def transform_statements(
                     registry,
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    type_lexemes_by_start=type_lexemes_by_start,
                 )
             if isinstance(node, exp.Schema):
                 return _rename_insert_column_list(
@@ -315,3 +325,68 @@ def transform_statements(
         transformed.append(statement.transform(_transform, copy=True))
 
     return transformed
+
+
+def _column_type_lexemes_by_start(batch_sql: str, *, dialect: str) -> dict[int, str]:
+    tokens = Tokenizer(dialect=dialect).tokenize(batch_sql)
+    token_index_by_start = {token.start: idx for idx, token in enumerate(tokens)}
+    type_lexemes_by_start: dict[int, str] = {}
+
+    for idx, token in enumerate(tokens):
+        if token.text != "(":
+            continue
+
+        cursor = idx + 1
+        while cursor < len(tokens):
+            current = tokens[cursor]
+            if current.text == ")":
+                break
+            if current.text == ",":
+                cursor += 1
+                continue
+
+            # Expected shape: <column_name> <type_keyword> ...
+            column_name_start = current.start
+            if cursor + 1 >= len(tokens):
+                break
+            type_token = tokens[cursor + 1]
+            if not _looks_like_type_keyword(type_token.text):
+                cursor += 1
+                continue
+
+            type_lexemes_by_start[column_name_start] = type_token.text
+
+            cursor += 2
+            while cursor < len(tokens):
+                tail = tokens[cursor].text
+                if tail == "," or tail == ")":
+                    break
+                cursor += 1
+            continue
+
+    # Keep only entries that correspond to real token starts.
+    return {
+        start: lexeme
+        for start, lexeme in type_lexemes_by_start.items()
+        if start in token_index_by_start
+    }
+
+
+def _column_def_type_lexeme(
+    column_def: exp.ColumnDef,
+    type_lexemes_by_start: dict[int, str],
+) -> str | None:
+    identifier = column_def.this
+    if not isinstance(identifier, exp.Identifier):
+        return None
+
+    start = identifier.meta.get("start")
+    if not isinstance(start, int):
+        return None
+    return type_lexemes_by_start.get(start)
+
+
+def _looks_like_type_keyword(value: str) -> bool:
+    if not value:
+        return False
+    return value[0].isalpha() or value[0] in {"[", '"'}
