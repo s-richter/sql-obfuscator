@@ -7,8 +7,9 @@ from sqlglot import exp, parse
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
 
+from .dialects_base import DialectProfile
+from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
-from .go_batches import join_batches, split_batches
 
 
 @dataclass
@@ -92,19 +93,18 @@ def _is_update_alias_target(table: exp.Table) -> bool:
     return table_name.name in alias_names
 
 
-def _raw_table_name(identifier: exp.Identifier) -> str:
-    prefix = ""
-    if identifier.args.get("global_"):
-        prefix = "##"
-    elif identifier.args.get("temporary"):
-        prefix = "#"
-    return f"{prefix}{identifier.name}"
-
-
-def _set_identifier(identifier: exp.Identifier, original: _ReverseEntry) -> None:
-    identifier.set("this", _strip_temp_prefix(original.original_unbracketed, original.temp_prefix))
-    if original.original_was_bracketed:
-        identifier.set("quoted", True)
+def _set_identifier(
+    identifier: exp.Identifier,
+    original: _ReverseEntry,
+    *,
+    profile: DialectProfile,
+) -> None:
+    original_unquoted = _strip_temp_prefix(original.original_unbracketed, original.temp_prefix)
+    profile.apply_original_quoting(
+        identifier,
+        original_unquoted=original_unquoted,
+        original_was_quoted=original.original_was_bracketed,
+    )
 
 
 def _strip_temp_prefix(value: str, temp_prefix: str) -> str:
@@ -155,6 +155,7 @@ def _resolve_and_apply(
     kind: str,
     batch_index: int,
     statement_index: int,
+    profile: DialectProfile,
 ) -> _ReverseEntry | None:
     resolved = resolver.resolve(
         obfuscated_lexeme,
@@ -182,7 +183,7 @@ def _resolve_and_apply(
                 statement_index=statement_index,
             )
         return None
-    _set_identifier(identifier, resolved)
+    _set_identifier(identifier, resolved, profile=profile)
     report["mapped_identifiers"] += 1
     return resolved
 
@@ -194,6 +195,7 @@ def _transform_statement(
     report: dict[str, Any],
     batch_index: int,
     statement_index: int,
+    profile: DialectProfile,
 ) -> Expression:
     def _transform(node: Expression) -> Expression:
         if isinstance(node, exp.Table):
@@ -205,10 +207,11 @@ def _transform_statement(
                 resolver,
                 report=report,
                 identifier=identifier,
-                obfuscated_lexeme=_raw_table_name(identifier),
+                obfuscated_lexeme=profile.table_identifier_raw(identifier),
                 kind=kind,
                 batch_index=batch_index,
                 statement_index=statement_index,
+                profile=profile,
             )
             return node
 
@@ -223,6 +226,7 @@ def _transform_statement(
                     kind="column",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             qualifier = node.args.get("table")
             if isinstance(qualifier, exp.Identifier):
@@ -234,6 +238,7 @@ def _transform_statement(
                     kind="alias",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             return node
 
@@ -248,6 +253,7 @@ def _transform_statement(
                     kind="cte",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             return node
 
@@ -263,6 +269,7 @@ def _transform_statement(
                     kind="alias",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             for identifier in node.args.get("columns") or []:
                 if isinstance(identifier, exp.Identifier):
@@ -274,6 +281,7 @@ def _transform_statement(
                         kind="column_alias",
                         batch_index=batch_index,
                         statement_index=statement_index,
+                        profile=profile,
                     )
             return node
 
@@ -288,6 +296,7 @@ def _transform_statement(
                     kind="column_alias",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             return node
 
@@ -301,6 +310,7 @@ def _transform_statement(
                     kind="column_def",
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
                 if resolved is not None:
                     _restore_column_def_type_lexeme(
@@ -324,6 +334,7 @@ def _transform_statement(
                         kind="insert_column",
                         batch_index=batch_index,
                         statement_index=statement_index,
+                        profile=profile,
                     )
             return node
 
@@ -387,6 +398,7 @@ def deobfuscate_sql_with_report(
         raise WorkspaceError("Unsupported context schema version.")
 
     dialect = context_payload.get("dialect", "tsql")
+    profile = get_dialect_profile(dialect)
     if pretty is None:
         pretty = bool(context_payload.get("pretty", True))
 
@@ -400,7 +412,7 @@ def deobfuscate_sql_with_report(
     }
 
     output_batches: list[str] = []
-    batches = split_batches(script)
+    batches = profile.split_batches(script)
     report["batch_count"] = len(batches)
 
     for batch_index, batch_sql in enumerate(batches, start=1):
@@ -423,13 +435,14 @@ def deobfuscate_sql_with_report(
                     report=report,
                     batch_index=batch_index,
                     statement_index=statement_index,
+                    profile=profile,
                 )
             )
         output_batches.append(
             ";\n".join(stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed)
         )
 
-    output_sql = join_batches(output_batches)
+    output_sql = profile.join_batches(output_batches)
     report["unknown_count"] = len(report["unknown_identifiers"])
     report["ambiguous_count"] = len(report["ambiguous_identifiers"])
     report["unknown_by_kind"] = _count_by_kind(report["unknown_identifiers"])

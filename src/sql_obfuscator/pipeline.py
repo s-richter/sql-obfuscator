@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from sqlglot import parse
 from sqlglot.errors import ParseError
 
+from .dialects_base import DialectProfile
+from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError
-from .go_batches import join_batches, split_batches
 from .registry import IdentifierRegistry
 from .transformer import transform_statements
 
@@ -43,6 +44,7 @@ def _process_batch(
     *,
     dialect: str,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     pretty: bool = False,
     batch_number: int = 1,
     total_batches: int = 1,
@@ -63,6 +65,7 @@ def _process_batch(
         batch_index=batch_number,
         batch_sql=batch_sql,
         dialect=dialect,
+        profile=profile,
     )
     return ";\n".join(
         stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed
@@ -103,8 +106,9 @@ def obfuscate_sql_with_metadata(
     pretty: bool = True,
 ) -> ObfuscationResult:
     del strict_go  # reserved for future strict GO edge-case handling
-    registry = IdentifierRegistry(seed=seed)
-    batches = split_batches(script)
+    profile = get_dialect_profile(dialect)
+    registry = IdentifierRegistry(profile=profile, seed=seed)
+    batches = profile.split_batches(script)
     transformed_batches = []
     total_statements = 0
     for batch_idx, batch in enumerate(batches, start=1):
@@ -112,6 +116,7 @@ def obfuscate_sql_with_metadata(
             batch,
             dialect=dialect,
             registry=registry,
+            profile=profile,
             pretty=pretty,
             batch_number=batch_idx,
             total_batches=len(batches),
@@ -120,7 +125,7 @@ def obfuscate_sql_with_metadata(
         if batch.strip():
             total_statements += len(parse(batch, dialect=dialect))
 
-    output_sql = join_batches(transformed_batches)
+    output_sql = profile.join_batches(transformed_batches)
     mapping_payload = registry.mapping_payload()
     context_payload = {
         "schema_version": 1,

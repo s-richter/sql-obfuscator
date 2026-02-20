@@ -69,7 +69,7 @@ class TestFullTestSuite:
         sql_file.write_text(sql_content, encoding="utf-8")
 
         # Run the obfuscator
-        rc = main([str(sql_file)])
+        rc = main(["obfuscate", str(sql_file)])
 
         # Should succeed
         assert rc == 0
@@ -138,7 +138,7 @@ class TestFullTestSuite:
 
     def test_failure_mode_non_existent_file_exit_code(self, tmp_path: Path):
         """Confirm failure modes return non-zero exit code."""
-        rc = main(["/nonexistent/path/file.sql"])
+        rc = main(["obfuscate", "/nonexistent/path/file.sql"])
         assert rc == 1
 
     def test_failure_mode_parse_error_exit_code(self, tmp_path: Path):
@@ -146,7 +146,7 @@ class TestFullTestSuite:
         sql_file = tmp_path / "invalid.sql"
         sql_file.write_text("SELECT ((", encoding="utf-8")
 
-        rc = main([str(sql_file)])
+        rc = main(["obfuscate", str(sql_file)])
         assert rc == 1
 
     def test_success_case_returns_zero(self, tmp_path: Path):
@@ -154,7 +154,7 @@ class TestFullTestSuite:
         sql_file = tmp_path / "valid.sql"
         sql_file.write_text("SELECT 1;", encoding="utf-8")
 
-        rc = main([str(sql_file)])
+        rc = main(["obfuscate", str(sql_file)])
         assert rc == 0
 
     def test_output_remains_parseable_after_obfuscation(self):
@@ -262,7 +262,7 @@ class TestFullTestSuite:
         sql_file.write_text(sql_content, encoding="utf-8")
 
         # Run obfuscator
-        rc = main([str(sql_file)])
+        rc = main(["obfuscate", str(sql_file)])
 
         # Should succeed
         assert rc == 0

@@ -7,7 +7,7 @@ from sql_obfuscator.cli import main
 
 
 def test_cli_missing_file_returns_nonzero(capsys):
-    rc = main(["does_not_exist.sql"])
+    rc = main(["obfuscate", "does_not_exist.sql"])
     captured = capsys.readouterr()
     assert rc == 1
     assert "Error:" in captured.err
@@ -17,7 +17,7 @@ def test_cli_prints_output_for_valid_sql(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT 1;", encoding="utf-8")
 
-    rc = main([str(sql_file)])
+    rc = main(["obfuscate", str(sql_file)])
     captured = capsys.readouterr()
 
     assert rc == 0
@@ -29,7 +29,7 @@ def test_cli_writes_obfuscated_output_file(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT 1;", encoding="utf-8")
 
-    rc = main([str(sql_file)])
+    rc = main(["obfuscate", str(sql_file)])
     capsys.readouterr()
 
     output_file = tmp_path / "input_obfuscated.sql"
@@ -58,7 +58,7 @@ def test_cli_parse_error_returns_nonzero_with_context(tmp_path: Path, capsys):
     invalid_sql = "SELECT (("  # Unclosed parentheses - will fail to parse
     sql_file.write_text(invalid_sql, encoding="utf-8")
 
-    rc = main([str(sql_file)])
+    rc = main(["obfuscate", str(sql_file)])
     captured = capsys.readouterr()
 
     assert rc == 1
@@ -73,7 +73,7 @@ def test_cli_parse_error_in_batch_two(tmp_path: Path, capsys):
     sql_content = "SELECT 1;\nGO\nSELECT (("
     sql_file.write_text(sql_content, encoding="utf-8")
 
-    rc = main([str(sql_file)])
+    rc = main(["obfuscate", str(sql_file)])
     captured = capsys.readouterr()
 
     assert rc == 1
@@ -85,7 +85,7 @@ def test_cli_parse_error_does_not_write_output_file(tmp_path: Path, capsys):
     sql_file = tmp_path / "invalid.sql"
     sql_file.write_text("SELECT ((", encoding="utf-8")
 
-    rc = main([str(sql_file)])
+    rc = main(["obfuscate", str(sql_file)])
     capsys.readouterr()
 
     output_file = tmp_path / "invalid_obfuscated.sql"
@@ -100,7 +100,7 @@ def test_cli_pretty_writes_pretty_output_file(tmp_path: Path, capsys):
         encoding="utf-8",
     )
 
-    rc = main([str(sql_file), "--pretty"])
+    rc = main(["obfuscate", str(sql_file), "--pretty"])
     captured = capsys.readouterr()
 
     output_file = tmp_path / "input_obfuscated.sql"
@@ -118,7 +118,7 @@ def test_cli_no_pretty_writes_compact_output_file(tmp_path: Path, capsys):
         encoding="utf-8",
     )
 
-    rc = main([str(sql_file), "--no-pretty"])
+    rc = main(["obfuscate", str(sql_file), "--no-pretty"])
     capsys.readouterr()
 
     output_file = tmp_path / "input_obfuscated.sql"
@@ -133,7 +133,7 @@ def test_cli_allows_custom_workspace_path(tmp_path: Path, capsys):
     sql_file.write_text("SELECT 1;", encoding="utf-8")
     custom_workspace = tmp_path / "my_workspace"
 
-    rc = main([str(sql_file), "--workspace", str(custom_workspace)])
+    rc = main(["obfuscate", str(sql_file), "--workspace", str(custom_workspace)])
     capsys.readouterr()
 
     assert rc == 0
@@ -165,7 +165,7 @@ def test_cli_obfuscate_subcommand_works(tmp_path: Path, capsys):
 def test_cli_deobfuscate_subcommand_works(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT [UserId] AS TotalAmount FROM Users u;", encoding="utf-8")
-    assert main([str(sql_file)]) == 0
+    assert main(["obfuscate", str(sql_file)]) == 0
     capsys.readouterr()
 
     edited_path = tmp_path / "input.obf" / "obfuscated.sql"
@@ -191,7 +191,7 @@ def test_cli_deobfuscate_subcommand_works(tmp_path: Path, capsys):
 def test_cli_deobfuscate_dry_run_no_file_write(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
-    assert main([str(sql_file)]) == 0
+    assert main(["obfuscate", str(sql_file)]) == 0
     capsys.readouterr()
 
     edited_path = tmp_path / "input.obf" / "obfuscated.sql"
@@ -216,7 +216,7 @@ def test_cli_deobfuscate_dry_run_no_file_write(tmp_path: Path, capsys):
 def test_cli_deobfuscate_dry_run_unresolved_returns_nonzero(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
-    assert main([str(sql_file)]) == 0
+    assert main(["obfuscate", str(sql_file)]) == 0
     capsys.readouterr()
 
     edited_path = tmp_path / "edited.sql"
@@ -278,7 +278,7 @@ def test_cli_uses_custom_instruction_template(tmp_path: Path, capsys):
     template = tmp_path / "my_template.md"
     template.write_text("# Custom\nUse this exact template.\n", encoding="utf-8")
 
-    rc = main([str(sql_file), "--instruction-template", str(template)])
+    rc = main(["obfuscate", str(sql_file), "--instruction-template", str(template)])
     capsys.readouterr()
 
     assert rc == 0
@@ -317,7 +317,7 @@ def test_cli_workspace_info_missing_workspace(tmp_path: Path, capsys):
 def test_cli_workspace_info_detects_integrity_tampering(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT 1;", encoding="utf-8")
-    assert main([str(sql_file)]) == 0
+    assert main(["obfuscate", str(sql_file)]) == 0
     capsys.readouterr()
 
     mapping_path = tmp_path / "input.obf" / "mapping.json"
@@ -333,7 +333,7 @@ def test_cli_workspace_info_detects_integrity_tampering(tmp_path: Path, capsys):
 def test_cli_deobfuscate_detects_integrity_tampering(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
-    assert main([str(sql_file)]) == 0
+    assert main(["obfuscate", str(sql_file)]) == 0
     capsys.readouterr()
 
     context_path = tmp_path / "input.obf" / "context.json"

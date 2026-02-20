@@ -8,9 +8,9 @@ from pathlib import Path
 from sqlglot import parse
 from sqlglot.errors import ParseError
 
+from .dialects_factory import get_dialect_profile, supported_dialects
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
-from .go_batches import join_batches, split_batches
 from .pipeline import obfuscate_sql_with_metadata
 from .workspace import (
     default_workspace_path,
@@ -29,7 +29,12 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Workspace folder for saved artifacts (default: <input_stem>.obf)",
     )
-    parser.add_argument("--dialect", default="tsql", help="sqlglot dialect (default: tsql)")
+    parser.add_argument(
+        "--dialect",
+        default="tsql",
+        choices=supported_dialects(),
+        help="SQL dialect profile",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Deterministic random seed")
     parser.add_argument(
         "--pretty",
@@ -47,16 +52,6 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional path to a markdown template used as llm_instructions.md",
     )
-
-
-def build_legacy_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="obfuscator.py",
-        description="Obfuscate SQL identifiers in a T-SQL script.",
-    )
-    parser.add_argument("sql_file", help="Path to input .sql file")
-    _add_common_obfuscation_args(parser)
-    return parser
 
 
 def build_command_parser() -> argparse.ArgumentParser:
@@ -161,14 +156,15 @@ def _read_optional_template(path: str | None) -> str | None:
 
 
 def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
+    profile = get_dialect_profile(dialect)
     normalized_batches: list[str] = []
-    for batch in split_batches(sql_text):
+    for batch in profile.split_batches(sql_text):
         if not batch.strip():
             normalized_batches.append(batch)
             continue
         statements = parse(batch, dialect=dialect)
         normalized_batches.append(";\n".join(stmt.sql(dialect=dialect, pretty=True) for stmt in statements))
-    return join_batches(normalized_batches)
+    return profile.join_batches(normalized_batches)
 
 
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
@@ -387,30 +383,20 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _is_subcommand_mode(argv: list[str] | None) -> bool:
-    if argv is None:
-        argv = sys.argv[1:]
-    if not argv:
-        return False
-    return argv[0] in {"obfuscate", "deobfuscate", "roundtrip", "workspace-info"}
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = build_command_parser() if _is_subcommand_mode(argv) else build_legacy_parser()
+    parser = build_command_parser()
     args = parser.parse_args(argv)
 
     try:
-        if _is_subcommand_mode(argv):
-            if args.command == "obfuscate":
-                return _run_obfuscate_command(args)
-            if args.command == "deobfuscate":
-                return _run_deobfuscate_command(args)
-            if args.command == "roundtrip":
-                return _run_roundtrip_command(args)
-            if args.command == "workspace-info":
-                return _run_workspace_info_command(args)
-            raise WorkspaceError(f"Unknown command: {args.command}")
-        return _run_obfuscate_command(args)
+        if args.command == "obfuscate":
+            return _run_obfuscate_command(args)
+        if args.command == "deobfuscate":
+            return _run_deobfuscate_command(args)
+        if args.command == "roundtrip":
+            return _run_roundtrip_command(args)
+        if args.command == "workspace-info":
+            return _run_workspace_info_command(args)
+        raise WorkspaceError(f"Unknown command: {args.command}")
     except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

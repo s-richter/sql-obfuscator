@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .dialects_base import DialectProfile
+from .dialects_factory import get_dialect_profile
 from .names import AnimalNameProvider
 
 
@@ -33,26 +35,25 @@ class MappingEntry:
 
 
 def normalize_identifier(raw: str) -> IdentifierKey:
-    value = raw.strip()
-    if value.startswith("[") and value.endswith("]") and len(value) >= 2:
-        value = value[1:-1]
-
-    temp_prefix = ""
-    if value.startswith("##"):
-        temp_prefix = "##"
-        value = value[2:]
-    elif value.startswith("#"):
-        temp_prefix = "#"
-        value = value[1:]
-
-    return IdentifierKey(value=value.lower(), temp_prefix=temp_prefix)
+    profile = get_dialect_profile("tsql")
+    normalized = profile.normalize_identifier(raw)
+    return IdentifierKey(value=normalized.value, temp_prefix=normalized.temp_prefix)
 
 
 class IdentifierRegistry:
     """Holds normalized original->obfuscated identifier mapping."""
 
-    def __init__(self, seed: int | None = None) -> None:
-        self._name_provider = AnimalNameProvider(seed=seed)
+    def __init__(
+        self,
+        *,
+        profile: DialectProfile | None = None,
+        seed: int | None = None,
+    ) -> None:
+        self._profile = profile or get_dialect_profile("tsql")
+        self._name_provider = AnimalNameProvider(
+            seed=seed,
+            is_safe_identifier=self._profile.is_safe_identifier,
+        )
         self._map: dict[IdentifierKey, str] = {}
         self._entries: dict[IdentifierKey, MappingEntry] = {}
 
@@ -68,15 +69,15 @@ class IdentifierRegistry:
         role: str = "",
         type_lexeme: str | None = None,
     ) -> str:
-        key = normalize_identifier(raw_identifier)
+        normalized = self._profile.normalize_identifier(raw_identifier)
+        key = IdentifierKey(value=normalized.value, temp_prefix=normalized.temp_prefix)
         if key not in self._map:
             self._map[key] = self._name_provider.next_name()
-            original = raw_identifier.strip()
             self._entries[key] = MappingEntry(
                 key=key,
-                original_lexeme=original,
-                original_unbracketed=_original_without_temp_prefix(original, key.temp_prefix),
-                original_was_bracketed=_is_bracketed(original),
+                original_lexeme=raw_identifier.strip(),
+                original_unbracketed=normalized.original_unquoted,
+                original_was_bracketed=normalized.original_was_quoted,
                 obfuscated_unbracketed=self._map[key],
                 occurrences=[],
             )

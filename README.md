@@ -60,13 +60,7 @@ python obfuscator.py workspace-info --workspace script.obf
 - `roundtrip`: Obfuscate and immediately de-obfuscate for verification.
 - `workspace-info`: Show workspace artifact/report status and integrity info.
 
-Legacy mode is still supported:
-
-```bash
-python obfuscator.py script.sql
-```
-
-Equivalent to:
+Subcommand-only CLI:
 
 ```bash
 python obfuscator.py obfuscate script.sql
@@ -214,10 +208,10 @@ Prints:
 python obfuscator.py obfuscate sample_sql/01_simple_select.sql
 ```
 
-### Legacy Invocation
+### Explicit Subcommand Invocation
 
 ```bash
-python obfuscator.py sample_sql/01_simple_select.sql
+python obfuscator.py obfuscate sample_sql/01_simple_select.sql
 ```
 
 ### Deterministic Obfuscation

@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from sqlglot import Tokenizer, exp
 from sqlglot.expressions import Expression
 
+from .dialects_base import DialectProfile
 from .registry import IdentifierRegistry
 
 
@@ -28,15 +29,6 @@ def _node_context(
     }
 
 
-def _raw_table_name(identifier: exp.Identifier) -> str:
-    prefix = ""
-    if identifier.args.get("global_"):
-        prefix = "##"
-    elif identifier.args.get("temporary"):
-        prefix = "#"
-    return f"{prefix}{identifier.name}"
-
-
 def _is_update_alias_target(table: exp.Table) -> bool:
     if not isinstance(table.parent, exp.Update) or table.arg_key != "this":
         return False
@@ -56,6 +48,7 @@ def _is_update_alias_target(table: exp.Table) -> bool:
 def _rename_table(
     table: exp.Table,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -79,12 +72,12 @@ def _rename_table(
         return table
 
     renamed = registry.get_or_create(
-        _raw_table_name(identifier),
+        profile.table_identifier_raw(identifier),
         kind="table",
         role="table_reference",
         **context,
     )
-    identifier.set("this", renamed.lstrip("#"))
+    identifier.set("this", profile.table_identifier_ast_value(renamed))
     return table
 
 
@@ -261,6 +254,7 @@ def transform_statements(
     statements: Sequence[Expression],
     *,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     batch_index: int,
     batch_sql: str,
     dialect: str,
@@ -274,6 +268,7 @@ def transform_statements(
                 return _rename_table(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
