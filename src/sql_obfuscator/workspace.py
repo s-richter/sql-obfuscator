@@ -50,6 +50,23 @@ INTEGRITY_JSON_SCHEMA: dict[str, Any] = {
     ],
 }
 
+TRANSLATION_REPORT_JSON_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SQL Translation Report Schema",
+    "type": "object",
+    "required": [
+        "source_dialect",
+        "target_dialect",
+        "batch_count",
+        "statement_count",
+        "translated_statement_count",
+        "failed_statement_count",
+        "warnings",
+        "failures",
+        "validated",
+    ],
+}
+
 INTEGRITY_TRACKED_FILES = [
     "original.sql",
     "obfuscated.sql",
@@ -202,6 +219,24 @@ def save_roundtrip_reports(
         _write_text(reports_path / "deobfuscated_pretty.sql", deobfuscated_pretty_sql)
     if normalized_diff_text is not None:
         _write_text(reports_path / "roundtrip_normalized_diff.txt", normalized_diff_text)
+
+
+def save_translation_artifacts(
+    *,
+    workspace_path: Path,
+    report_payload: dict[str, Any],
+    translated_sql: str | None = None,
+) -> None:
+    reports_path = workspace_path / "reports"
+    try:
+        reports_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
+
+    _write_json(reports_path / "translation_report.schema.json", TRANSLATION_REPORT_JSON_SCHEMA)
+    _write_json(reports_path / "translation_report.json", report_payload)
+    if translated_sql is not None:
+        _write_text(workspace_path / "translated.sql", translated_sql)
 
 
 def _write_text(path: Path, content: str) -> None:

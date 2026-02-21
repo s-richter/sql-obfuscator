@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from sql_obfuscator.cli import main
 
 
@@ -304,6 +306,8 @@ def test_cli_workspace_info_subcommand(tmp_path: Path, capsys):
     assert "reports/original_pretty.sql: yes" in captured.out
     assert "reports/deobfuscated_pretty.sql: yes" in captured.out
     assert "reports/roundtrip_normalized_diff.txt: yes" in captured.out
+    assert "translated.sql: no" in captured.out
+    assert "reports/translation_report.json: no" in captured.out
 
 
 def test_cli_workspace_info_missing_workspace(tmp_path: Path, capsys):
@@ -353,3 +357,151 @@ def test_cli_deobfuscate_detects_integrity_tampering(tmp_path: Path, capsys):
 
     assert rc == 1
     assert "Integrity check failed" in captured.err
+
+
+def test_cli_translate_writes_output_file_and_returns_zero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT [UserId] FROM [Users];", encoding="utf-8")
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "translate summary:" in captured.out
+    assert (tmp_path / "input_hive.sql").exists()
+
+
+def test_cli_translate_report_only_does_not_write_sql_output(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT [UserId] FROM [Users];", encoding="utf-8")
+    workspace = tmp_path / "translate_ws"
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--report-only",
+            "--workspace",
+            str(workspace),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (tmp_path / "input_hive.sql").exists() is False
+    assert (workspace / "reports" / "translation_report.json").exists()
+
+
+def test_cli_translate_invalid_dialect_returns_nonzero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "translate",
+                "--input",
+                str(sql_file),
+                "--source-dialect",
+                "postgres",
+                "--target-dialect",
+                "hive",
+            ]
+        )
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "invalid choice" in captured.err
+
+
+def test_cli_translate_parse_error_path_returns_nonzero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "bad.sql"
+    sql_file.write_text("SELECT ((", encoding="utf-8")
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "failed=1" in captured.out
+
+
+def test_cli_translate_validate_failure_returns_nonzero(tmp_path: Path, monkeypatch, capsys):
+    from sql_obfuscator import translation
+
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT [UserId] FROM [Users];", encoding="utf-8")
+    original_parse = translation.parse
+
+    def parse_for_test(sql: str, *, dialect: str):
+        if dialect == "hive" and "UserId" in sql:
+            raise translation.ParseError("forced validation failure")
+        return original_parse(sql, dialect=dialect)
+
+    monkeypatch.setattr(translation, "parse", parse_for_test)
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--validate",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "failed=" in captured.out
+
+
+def test_cli_translate_workspace_default_translated_sql(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT [UserId] FROM [Users];", encoding="utf-8")
+    workspace = tmp_path / "translate_ws"
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--workspace",
+            str(workspace),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (workspace / "translated.sql").exists()
+    assert (workspace / "reports" / "translation_report.json").exists()

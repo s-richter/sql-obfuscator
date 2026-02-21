@@ -9,6 +9,7 @@ from sql_obfuscator.workspace import (
     default_workspace_path,
     load_context_payload,
     load_mapping_payload,
+    save_translation_artifacts,
 )
 
 
@@ -46,3 +47,26 @@ def test_load_mapping_payload_rejects_missing_indexes(tmp_path: Path):
 
     with pytest.raises(WorkspaceError, match="forward_index"):
         load_mapping_payload(mapping_path)
+
+
+def test_save_translation_artifacts_writes_report_and_optional_sql(tmp_path: Path):
+    workspace = tmp_path / "translate_ws"
+    payload = {
+        "source_dialect": "tsql",
+        "target_dialect": "hive",
+        "batch_count": 1,
+        "statement_count": 1,
+        "translated_statement_count": 1,
+        "failed_statement_count": 0,
+        "warnings": [],
+        "failures": [],
+        "validated": True,
+    }
+    save_translation_artifacts(
+        workspace_path=workspace,
+        report_payload=payload,
+        translated_sql="SELECT 1",
+    )
+    assert (workspace / "translated.sql").exists()
+    assert (workspace / "reports" / "translation_report.json").exists()
+    assert (workspace / "reports" / "translation_report.schema.json").exists()

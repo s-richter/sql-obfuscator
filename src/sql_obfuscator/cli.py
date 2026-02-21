@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from sqlglot import parse
@@ -12,12 +13,14 @@ from .dialects_factory import get_dialect_profile, supported_dialects
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .pipeline import obfuscate_sql_with_metadata
+from .translation import translate_sql_with_report
 from .workspace import (
     default_workspace_path,
     load_context_payload,
     load_mapping_payload,
     save_deobfuscation_artifacts,
     save_roundtrip_reports,
+    save_translation_artifacts,
     save_workspace_artifacts,
     validate_workspace_integrity,
 )
@@ -105,6 +108,54 @@ def build_command_parser() -> argparse.ArgumentParser:
         help="Reserved for future roundtrip diff reporting",
     )
 
+    translate_parser = subparsers.add_parser(
+        "translate",
+        help="Translate SQL between supported dialects",
+    )
+    translate_parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to input .sql file",
+    )
+    translate_parser.add_argument(
+        "--source-dialect",
+        required=True,
+        choices=supported_dialects(),
+        help="Source parser dialect",
+    )
+    translate_parser.add_argument(
+        "--target-dialect",
+        required=True,
+        choices=supported_dialects(),
+        help="Target output dialect",
+    )
+    translate_parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output path for translated SQL",
+    )
+    translate_parser.add_argument(
+        "--pretty",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Pretty-format translated SQL output (default: enabled)",
+    )
+    translate_parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate translated output by parsing in target dialect",
+    )
+    translate_parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Optional workspace path for translation report artifacts",
+    )
+    translate_parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Skip writing translated SQL and only emit report/summary",
+    )
+
     workspace_info_parser = subparsers.add_parser(
         "workspace-info",
         help="Show workspace artifact and report status",
@@ -132,6 +183,12 @@ def _output_path_for_input(path: Path) -> Path:
     if path.suffix:
         return path.with_name(f"{path.stem}_obfuscated{path.suffix}")
     return path.with_name(f"{path.name}_obfuscated")
+
+
+def _translation_output_path_for_input(path: Path, *, target_dialect: str) -> Path:
+    if path.suffix:
+        return path.with_name(f"{path.stem}_{target_dialect}{path.suffix}")
+    return path.with_name(f"{path.name}_{target_dialect}.sql")
 
 
 def _write_output_file(path: Path, content: str) -> None:
@@ -350,6 +407,8 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     original_pretty_path = reports_path / "original_pretty.sql"
     deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
     roundtrip_normalized_diff_path = reports_path / "roundtrip_normalized_diff.txt"
+    translated_path = workspace_path / "translated.sql"
+    translation_report_path = reports_path / "translation_report.json"
 
     mapping_payload = load_mapping_payload(mapping_path)
     context_payload = load_context_payload(context_path)
@@ -378,8 +437,54 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
         f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",
         f"reports/roundtrip_normalized_diff.txt: {'yes' if roundtrip_normalized_diff_path.exists() else 'no'}",
+        f"translated.sql: {'yes' if translated_path.exists() else 'no'}",
+        f"reports/translation_report.json: {'yes' if translation_report_path.exists() else 'no'}",
     ]
     print("\n".join(lines))
+    return 0
+
+
+def _run_translate_command(args: argparse.Namespace) -> int:
+    input_path = Path(args.input)
+    sql_text = _read_sql_file(input_path)
+    result = translate_sql_with_report(
+        sql_text,
+        source_dialect=args.source_dialect,
+        target_dialect=args.target_dialect,
+        pretty=args.pretty,
+        validate=args.validate,
+    )
+
+    print(
+        "translate summary: "
+        f"source={result.source_dialect} "
+        f"target={result.target_dialect} "
+        f"statements={result.statement_count} "
+        f"failed={result.failed_statement_count} "
+        f"warnings={len(result.warnings)}"
+    )
+
+    if args.workspace:
+        workspace_path = Path(args.workspace)
+        save_translation_artifacts(
+            workspace_path=workspace_path,
+            report_payload=asdict(result),
+            translated_sql=result.output_sql if args.out is None and not args.report_only else None,
+        )
+
+    if result.failed_statement_count > 0:
+        return 1
+    if args.validate and not result.validated:
+        return 1
+    if args.report_only:
+        return 0
+
+    output_path = (
+        Path(args.out)
+        if args.out
+        else _translation_output_path_for_input(input_path, target_dialect=args.target_dialect)
+    )
+    _write_output_file(output_path, result.output_sql)
     return 0
 
 
@@ -396,6 +501,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_roundtrip_command(args)
         if args.command == "workspace-info":
             return _run_workspace_info_command(args)
+        if args.command == "translate":
+            return _run_translate_command(args)
         raise WorkspaceError(f"Unknown command: {args.command}")
     except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

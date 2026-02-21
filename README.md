@@ -7,6 +7,7 @@ Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE 
 - Obfuscates identifier names while preserving SQL syntax.
 - Supports deterministic output with seeds.
 - Handles multi-batch scripts separated by standalone `GO`.
+- Supports SQL translation between supported dialects (`tsql`, `hive`).
 - Creates a workspace folder per script with mapping/context artifacts for de-obfuscation workflows.
 - Supports LLM workflows: obfuscate -> send to LLM -> de-obfuscate edited output.
 
@@ -49,6 +50,9 @@ python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_r
 # One-command verification loop
 python obfuscator.py roundtrip script.sql --diff-report
 
+# Translate SQL between dialects
+python obfuscator.py translate --input script.sql --source-dialect tsql --target-dialect hive --validate
+
 # Check workspace health/status (includes integrity check)
 python obfuscator.py workspace-info --workspace script.obf
 ```
@@ -58,6 +62,7 @@ python obfuscator.py workspace-info --workspace script.obf
 - `obfuscate`: Obfuscate SQL and create workspace artifacts.
 - `deobfuscate`: Reverse obfuscation using workspace mapping/context.
 - `roundtrip`: Obfuscate and immediately de-obfuscate for verification.
+- `translate`: Translate SQL between supported dialects with optional validation/reporting.
 - `workspace-info`: Show workspace artifact/report status and integrity info.
 
 Subcommand-only CLI:
@@ -112,6 +117,8 @@ script.obf/
     |-- original_pretty.sql             # normalized with sqlglot pretty formatting
     |-- deobfuscated_pretty.sql         # normalized with sqlglot pretty formatting
     `-- roundtrip_normalized_diff.txt   # diff of the normalized pair above
+    |-- translation_report.schema.json  # after translate --workspace ...
+    `-- translation_report.json         # after translate --workspace ...
 ```
 
 ## Integrity Protection
@@ -200,6 +207,26 @@ Prints:
 - integrity algorithm and tracked-file count
 - artifact/report presence flags
 
+### `translate`
+
+```bash
+python obfuscator.py translate --input <input.sql> --source-dialect <dialect> --target-dialect <dialect> [options]
+```
+
+Options:
+
+- `--out <path>`: output file path (default: `<input_stem>_<target_dialect>.sql`)
+- `--pretty` / `--no-pretty`: formatted output on/off (default: `--pretty`)
+- `--validate`: parse translated SQL with target dialect and fail on parse errors
+- `--workspace <dir>`: optional path to persist `reports/translation_report.json`
+- `--report-only`: write no translated SQL file; only print summary and optional report artifact
+
+Output:
+
+- Always prints `translate summary: source=... target=... statements=... failed=... warnings=...`
+- Returns `0` when translation succeeds and optional validation passes
+- Returns `1` on read/parse/translation/validation/report-write failures
+
 ## Usage Examples
 
 ### Basic Obfuscation
@@ -268,6 +295,18 @@ python obfuscator.py roundtrip sample_sql/07_multiple_batches.sql
 python obfuscator.py roundtrip sample_sql/07_multiple_batches.sql --diff-report
 ```
 
+### Translate T-SQL to Hive
+
+```bash
+python obfuscator.py translate --input sample_sql/06_aggregate_functions.sql --source-dialect tsql --target-dialect hive --validate
+```
+
+### Translate Hive back to T-SQL
+
+```bash
+python obfuscator.py translate --input sample_sql/06_aggregate_functions_hive.sql --source-dialect hive --target-dialect tsql --validate
+```
+
 ### Workspace Status and Integrity
 
 ```bash
@@ -309,6 +348,32 @@ python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_r
 
 ```bash
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
+```
+
+### Cross-Dialect LLM Workflow
+
+1. Obfuscate source dialect script:
+
+```bash
+python obfuscator.py obfuscate script.sql --dialect tsql
+```
+
+2. Translate obfuscated SQL to target dialect:
+
+```bash
+python obfuscator.py translate --input script_obfuscated.sql --source-dialect tsql --target-dialect hive --validate
+```
+
+3. Translate edited SQL back to source dialect before de-obfuscation:
+
+```bash
+python obfuscator.py translate --input edited_hive.sql --source-dialect hive --target-dialect tsql --validate
+```
+
+4. De-obfuscate against the original workspace mapping:
+
+```bash
+python obfuscator.py deobfuscate --workspace script.obf --input edited_tsql.sql --dry-run
 ```
 
 ## Troubleshooting
@@ -360,11 +425,28 @@ Actions:
 1. Restore workspace from trusted copy, or
 2. Re-obfuscate to generate a fresh workspace and retry workflow.
 
+### Translation Failed or Validation Failed
+
+Symptoms:
+
+- `translate summary` shows `failed > 0`, or translate returns exit code `1`.
+
+Meaning:
+
+- Source parsing failed, statement emission failed, or `--validate` target parsing failed.
+
+Actions:
+
+1. Re-run with `--workspace` and inspect `reports/translation_report.json`.
+2. Narrow down the failing statement using `batch_index`/`statement_index` in the report.
+3. Translate in smaller sections when dealing with unsupported dialect-specific syntax.
+
 ## Notes and Limits
 
 - `--strict-go` is currently reserved and does not change behavior yet.
 - Comments/formatting can change due to SQL regeneration (`sqlglot` output style).
 - The tool targets identifier round-trip behavior, not byte-for-byte source reconstruction.
+- Translation is structural via `sqlglot`, not a semantic equivalence guarantee.
 
 ## Development
 

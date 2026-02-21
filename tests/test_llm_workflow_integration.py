@@ -133,3 +133,78 @@ def test_saved_mapping_artifacts_change_with_different_seed(tmp_path: Path, caps
 
     assert mapping1["forward_index"] != mapping2["forward_index"]
     assert obf1 != obf2
+
+
+def test_obfuscate_translate_roundtrip_back_then_deobfuscate_dry_run_clean(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        """
+        SELECT u.UserId, o.OrderId
+        FROM Users u
+        JOIN Orders o ON u.UserId = o.UserId
+        WHERE o.OrderId > 10;
+        """,
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "input.obf"
+
+    assert main(["obfuscate", str(sql_file), "--workspace", str(workspace), "--seed", "123"]) == 0
+    capsys.readouterr()
+
+    obfuscated_path = workspace / "obfuscated.sql"
+    tsql_to_hive = tmp_path / "obf_hive.sql"
+    hive_to_tsql = tmp_path / "obf_tsql.sql"
+
+    assert (
+        main(
+            [
+                "translate",
+                "--input",
+                str(obfuscated_path),
+                "--source-dialect",
+                "tsql",
+                "--target-dialect",
+                "hive",
+                "--out",
+                str(tsql_to_hive),
+                "--validate",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "translate",
+                "--input",
+                str(tsql_to_hive),
+                "--source-dialect",
+                "hive",
+                "--target-dialect",
+                "tsql",
+                "--out",
+                str(hive_to_tsql),
+                "--validate",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(hive_to_tsql),
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "unknown_count: 0" in captured.out
+    assert "ambiguous_count: 0" in captured.out
