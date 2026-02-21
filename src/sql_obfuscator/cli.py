@@ -13,11 +13,13 @@ from .dialects_factory import get_dialect_profile, supported_dialects
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .pipeline import obfuscate_sql_with_metadata
+from .redaction import restore_reversible_redaction
 from .translation import translate_sql_with_report
 from .workspace import (
     default_workspace_path,
     load_context_payload,
     load_mapping_payload,
+    load_redaction_payload,
     save_deobfuscation_artifacts,
     save_roundtrip_reports,
     save_translation_artifacts,
@@ -55,6 +57,30 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional path to a markdown template used as llm_instructions.md",
     )
+    parser.add_argument(
+        "--strip-comments",
+        action="store_true",
+        help="Remove SQL comments in obfuscated output",
+    )
+    parser.add_argument(
+        "--redact-literals",
+        action="store_true",
+        help="Redact string/numeric literals in obfuscated output",
+    )
+    parser.add_argument(
+        "--redaction-mode",
+        choices=("none", "irreversible", "reversible"),
+        default="none",
+        help="Redaction mode for obfuscated output (default: none)",
+    )
+
+
+def _validate_redaction_args(args: argparse.Namespace) -> None:
+    uses_redaction_flags = bool(args.strip_comments or args.redact_literals)
+    if args.redaction_mode == "none" and uses_redaction_flags:
+        raise WorkspaceError(
+            "Redaction flags require --redaction-mode irreversible or --redaction-mode reversible."
+        )
 
 
 def build_command_parser() -> argparse.ArgumentParser:
@@ -230,6 +256,7 @@ def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
 
 
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
+    _validate_redaction_args(args)
     input_path = Path(args.sql_file)
     sql_text = _read_sql_file(input_path)
     result = obfuscate_sql_with_metadata(
@@ -238,6 +265,9 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         seed=args.seed,
         strict_go=args.strict_go,
         pretty=args.pretty,
+        redact_literals=args.redact_literals,
+        strip_comments=args.strip_comments,
+        redaction_mode=args.redaction_mode,
     )
     output_sql = result.output_sql
     _write_output_file(_output_path_for_input(input_path), output_sql)
@@ -252,6 +282,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         mapping_payload=result.mapping_payload,
         context_payload=result.context_payload,
         llm_instructions_text=llm_instructions_text,
+        redaction_payload=result.redaction_payload,
     )
     # Validate schema and data shape immediately after write.
     load_mapping_payload(workspace_path / "mapping.json")
@@ -275,7 +306,26 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         mapping_payload=mapping_payload,
         context_payload=context_payload,
     )
+    redaction_path = workspace_path / "redaction.json"
+    redaction_report: dict | None = None
+    if redaction_path.exists():
+        redaction_payload = load_redaction_payload(redaction_path)
+        deobfuscated_sql, redaction_report = restore_reversible_redaction(
+            deobfuscated_sql,
+            dialect=context_payload.get("dialect", "tsql"),
+            pretty=bool(context_payload.get("pretty", True)),
+            redaction_payload=redaction_payload,
+        )
+        report["redaction"] = redaction_report
+
+    redaction_unresolved = False
+    if redaction_report is not None:
+        redaction_unresolved = (
+            redaction_report.get("unknown_placeholder_count", 0) > 0
+            or redaction_report.get("missing_placeholder_count", 0) > 0
+        )
     has_unresolved = report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0
+    has_unresolved = has_unresolved or redaction_unresolved
     if args.dry_run:
         print("deobfuscate dry-run summary:")
         print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
@@ -283,6 +333,9 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
         print(f"unknown_by_kind: {report.get('unknown_by_kind', {})}")
         print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
+        if redaction_report is not None:
+            print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
+            print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
         for recommendation in report.get("recommendations", []):
             print(f"recommendation: {recommendation}")
         if has_unresolved:
@@ -307,6 +360,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
 
 
 def _run_roundtrip_command(args: argparse.Namespace) -> int:
+    _validate_redaction_args(args)
     input_path = Path(args.sql_file)
     original_sql = _read_sql_file(input_path)
 
@@ -316,6 +370,9 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         seed=args.seed,
         strict_go=args.strict_go,
         pretty=args.pretty,
+        redact_literals=args.redact_literals,
+        strip_comments=args.strip_comments,
+        redaction_mode=args.redaction_mode,
     )
     obfuscated_sql = obfuscation.output_sql
     _write_output_file(_output_path_for_input(input_path), obfuscated_sql)
@@ -330,6 +387,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         mapping_payload=obfuscation.mapping_payload,
         context_payload=obfuscation.context_payload,
         llm_instructions_text=llm_instructions_text,
+        redaction_payload=obfuscation.redaction_payload,
     )
     mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
     context_payload = load_context_payload(workspace_path / "context.json")
@@ -340,6 +398,16 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         mapping_payload=mapping_payload,
         context_payload=context_payload,
     )
+    redaction_path = workspace_path / "redaction.json"
+    if redaction_path.exists():
+        redaction_payload = load_redaction_payload(redaction_path)
+        deobfuscated_sql, redaction_report = restore_reversible_redaction(
+            deobfuscated_sql,
+            dialect=context_payload.get("dialect", "tsql"),
+            pretty=bool(context_payload.get("pretty", True)),
+            redaction_payload=redaction_payload,
+        )
+        deobfuscation_report["redaction"] = redaction_report
     save_deobfuscation_artifacts(
         workspace_path=workspace_path,
         deobfuscated_sql=deobfuscated_sql,
@@ -397,6 +465,12 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         return 1
     if deobfuscation_report.get("ambiguous_count", 0) > 0:
         return 1
+    redaction_report = deobfuscation_report.get("redaction")
+    if isinstance(redaction_report, dict):
+        if redaction_report.get("unknown_placeholder_count", 0) > 0:
+            return 1
+        if redaction_report.get("missing_placeholder_count", 0) > 0:
+            return 1
     return 0
 
 
@@ -421,6 +495,8 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     roundtrip_normalized_diff_path = reports_path / "roundtrip_normalized_diff.txt"
     translated_path = workspace_path / "translated.sql"
     translation_report_path = reports_path / "translation_report.json"
+    redaction_path = workspace_path / "redaction.json"
+    redaction_schema_path = workspace_path / "redaction.schema.json"
 
     mapping_payload = load_mapping_payload(mapping_path)
     context_payload = load_context_payload(context_path)
@@ -451,6 +527,8 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/roundtrip_normalized_diff.txt: {'yes' if roundtrip_normalized_diff_path.exists() else 'no'}",
         f"translated.sql: {'yes' if translated_path.exists() else 'no'}",
         f"reports/translation_report.json: {'yes' if translation_report_path.exists() else 'no'}",
+        f"redaction.json: {'yes' if redaction_path.exists() else 'no'}",
+        f"redaction.schema.json: {'yes' if redaction_schema_path.exists() else 'no'}",
     ]
     print("\n".join(lines))
     return 0

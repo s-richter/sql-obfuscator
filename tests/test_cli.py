@@ -164,6 +164,138 @@ def test_cli_obfuscate_subcommand_works(tmp_path: Path, capsys):
     assert (tmp_path / "input.obf" / "mapping.json").exists()
 
 
+def test_cli_obfuscate_redaction_requires_mode(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 'secret' AS x;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--redact-literals"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Redaction flags require" in captured.err
+
+
+def test_cli_obfuscate_redact_literals_and_strip_comments(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 'secret' AS x --comment\nFROM Users WHERE Score = 99;", encoding="utf-8")
+
+    rc = main(
+        [
+            "obfuscate",
+            str(sql_file),
+            "--redaction-mode",
+            "irreversible",
+            "--redact-literals",
+            "--strip-comments",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "<REDACTED_STR>" in captured.out
+    assert "0" in captured.out
+    assert "comment" not in captured.out
+
+    output = (tmp_path / "input_obfuscated.sql").read_text(encoding="utf-8")
+    assert "<REDACTED_STR>" in output
+    assert "comment" not in output
+
+
+def test_cli_obfuscate_reversible_redaction_writes_artifacts(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 'secret';", encoding="utf-8")
+
+    rc = main(
+        [
+            "obfuscate",
+            str(sql_file),
+            "--redaction-mode",
+            "reversible",
+            "--redact-literals",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "__SQL_OBFUSCATOR_STR_" in captured.out
+    workspace = tmp_path / "input.obf"
+    assert (workspace / "redaction.json").exists()
+    assert (workspace / "redaction.schema.json").exists()
+
+
+def test_cli_deobfuscate_restores_reversible_redacted_literals(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users WHERE Status = 'secret' AND Score = 99;", encoding="utf-8")
+    assert (
+        main(
+            [
+                "obfuscate",
+                str(sql_file),
+                "--redaction-mode",
+                "reversible",
+                "--redact-literals",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    edited_path = tmp_path / "input.obf" / "obfuscated.sql"
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "secret" in captured.out
+    assert "99" in captured.out
+
+
+def test_cli_deobfuscate_reversible_placeholder_unresolved_returns_nonzero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users WHERE Status = 'secret';", encoding="utf-8")
+    assert (
+        main(
+            [
+                "obfuscate",
+                str(sql_file),
+                "--redaction-mode",
+                "reversible",
+                "--redact-literals",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    edited_path = tmp_path / "edited.sql"
+    obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path.write_text(
+        obfuscated_sql.replace("__SQL_OBFUSCATOR_STR_", "__SQL_OBFUSCATOR_STR_BROKEN_", 1),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "unresolved mappings" in captured.err
+
+
 def test_cli_deobfuscate_subcommand_works(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT [UserId] AS TotalAmount FROM Users u;", encoding="utf-8")

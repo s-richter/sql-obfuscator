@@ -41,6 +41,9 @@ python obfuscator.py obfuscate script.sql --seed 42
 # Obfuscate with custom workspace
 python obfuscator.py obfuscate script.sql --workspace my_run.obf
 
+# Obfuscate with irreversible literal/comment redaction for LLM sharing
+python obfuscator.py obfuscate script.sql --redaction-mode irreversible --redact-literals --strip-comments
+
 # Validate LLM-edited obfuscated SQL without writing outputs
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
 
@@ -91,6 +94,31 @@ python obfuscator.py obfuscate script.sql
 - Function invocation names
 - Schema qualifiers (for example `dbo`)
 
+## Redaction Behavior
+
+Redaction is optional and controlled by:
+
+- `--redact-literals`
+- `--strip-comments`
+- `--redaction-mode <none|irreversible|reversible>`
+
+Modes:
+
+- `none`: default behavior; no literal/comment redaction.
+- `irreversible`: literals/comments are sanitized for LLM sharing and original values are not recoverable from redaction metadata.
+- `reversible`: literals are replaced with deterministic placeholders and restored during `deobfuscate` via workspace metadata.
+
+Current literal coverage:
+
+- String literals and numeric literals are redacted.
+- Date-like literals represented as strings are redacted.
+- Boolean/NULL tokens are currently preserved.
+- Numeric literals used as datatype parameters (for example `NUMERIC(10,2)`) are preserved.
+
+Safety note:
+
+- Redaction is AST-based (`sqlglot`) and not regex-only; regex-only redaction is intentionally not the primary privacy mechanism.
+
 ## Workspace Model
 
 By default, `script.sql` produces a workspace `script.obf/`.
@@ -109,6 +137,8 @@ script.obf/
 |-- mapping.schema.json
 |-- context.schema.json
 |-- integrity.schema.json
+|-- redaction.json                    # reversible redaction mode only
+|-- redaction.schema.json             # reversible redaction mode only
 `-- reports/
     |-- deobfuscation_report.json       # after deobfuscate/roundtrip
     |-- coverage_report.txt             # after deobfuscate/roundtrip
@@ -131,6 +161,7 @@ Tracked files:
 - `obfuscated.sql`
 - `mapping.json`
 - `context.json`
+- `redaction.json` (reversible redaction mode only)
 
 If checksums do not match, `deobfuscate`, `roundtrip`, and `workspace-info` fail with an integrity error.
 
@@ -150,6 +181,9 @@ Options:
 - `--pretty` / `--no-pretty`: formatted output on/off (default: `--pretty`)
 - `--strict-go`: accepted but currently no-op (reserved)
 - `--instruction-template <path>`: custom `llm_instructions.md` template
+- `--strip-comments`: remove SQL comments from obfuscated output
+- `--redact-literals`: redact string/numeric literals in obfuscated output
+- `--redaction-mode <none|irreversible|reversible>`: redaction behavior (default: `none`)
 
 Output:
 
@@ -171,13 +205,13 @@ Options:
 
 Dry-run exit behavior:
 
-- `0` when no unknown/ambiguous mappings
-- `1` when unknown/ambiguous mappings are found
+- `0` when no unresolved identifier mappings and no unresolved reversible-redaction placeholders
+- `1` when unresolved identifiers or unresolved reversible-redaction placeholders are found
 
 Non-dry-run exit behavior:
 
-- `0` when no unknown/ambiguous mappings are found, or when `--allow-unresolved` is set
-- `1` when unknown/ambiguous mappings are found and `--allow-unresolved` is not set
+- `0` when no unresolved mappings/placeholders are found, or when `--allow-unresolved` is set
+- `1` when unresolved mappings/placeholders are found and `--allow-unresolved` is not set
 
 ### `roundtrip`
 
@@ -271,6 +305,20 @@ python obfuscator.py obfuscate sample_sql/03_cte_example.sql --workspace .tmp/ws
 python obfuscator.py obfuscate sample_sql/04_temporary_tables.sql --instruction-template my_llm_prompt.md
 ```
 
+### Redaction For LLM Sharing (Irreversible)
+
+```bash
+python obfuscator.py obfuscate script.sql --redaction-mode irreversible --redact-literals --strip-comments
+```
+
+### Redaction For Roundtrip Restoration (Reversible)
+
+```bash
+python obfuscator.py obfuscate script.sql --redaction-mode reversible --redact-literals --strip-comments
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
+python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
+```
+
 ### De-obfuscate an LLM-Edited Script
 
 ```bash
@@ -356,6 +404,12 @@ python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_r
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
 ```
 
+Recommended privacy-oriented variant:
+
+```bash
+python obfuscator.py obfuscate script.sql --redaction-mode reversible --redact-literals --strip-comments
+```
+
 ### Cross-Dialect LLM Workflow
 
 1. Obfuscate source dialect script:
@@ -430,6 +484,22 @@ Actions:
 
 1. Restore workspace from trusted copy, or
 2. Re-obfuscate to generate a fresh workspace and retry workflow.
+
+### Reversible Redaction Placeholders Unresolved
+
+Symptoms:
+
+- Dry-run shows `redaction_unknown_placeholder_count > 0` or `redaction_missing_placeholder_count > 0`.
+
+Meaning:
+
+- LLM output changed or removed placeholder literals produced by reversible redaction.
+
+Actions:
+
+1. Ask the LLM to preserve placeholder literals exactly.
+2. Re-run `deobfuscate --dry-run` and verify both redaction counters are zero.
+3. If placeholders were heavily rewritten, re-obfuscate and retry with stricter prompt instructions.
 
 ### Translation Failed or Validation Failed
 

@@ -208,3 +208,62 @@ def test_obfuscate_translate_roundtrip_back_then_deobfuscate_dry_run_clean(tmp_p
     assert rc == 0
     assert "unknown_count: 0" in captured.out
     assert "ambiguous_count: 0" in captured.out
+
+
+def test_llm_style_edit_with_reversible_redaction_restores_literals(tmp_path: Path, capsys):
+    sql_file = tmp_path / "redacted.sql"
+    sql_file.write_text(
+        """
+        SELECT u.UserId, o.OrderId
+        FROM Users u
+        JOIN Orders o ON u.UserId = o.UserId
+        WHERE o.Status = 'CONFIDENTIAL' AND o.Priority = 7;
+        """,
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "redacted.obf"
+
+    assert (
+        main(
+            [
+                "obfuscate",
+                str(sql_file),
+                "--workspace",
+                str(workspace),
+                "--seed",
+                "123",
+                "--redaction-mode",
+                "reversible",
+                "--redact-literals",
+                "--strip-comments",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    obfuscated_sql = (workspace / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_obfuscated = obfuscated_sql.replace("WHERE", "WHERE 1 = 1 AND", 1)
+    edited_path = workspace / "llm_response_obfuscated.sql"
+    edited_path.write_text(edited_obfuscated, encoding="utf-8")
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    deobfuscated_sql = (workspace / "deobfuscated.sql").read_text(encoding="utf-8")
+    assert "CONFIDENTIAL" in deobfuscated_sql
+    assert "7" in deobfuscated_sql
+    assert "1 = 1" in deobfuscated_sql
+    report = json.loads((workspace / "reports" / "deobfuscation_report.json").read_text(encoding="utf-8"))
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+    assert report.get("redaction", {}).get("missing_placeholder_count", 0) == 0

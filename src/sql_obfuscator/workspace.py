@@ -11,6 +11,7 @@ from .errors import WorkspaceError
 MAPPING_SCHEMA_VERSION = 1
 CONTEXT_SCHEMA_VERSION = 1
 INTEGRITY_SCHEMA_VERSION = 1
+REDACTION_SCHEMA_VERSION = 1
 
 MAPPING_JSON_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -67,6 +68,17 @@ TRANSLATION_REPORT_JSON_SCHEMA: dict[str, Any] = {
     ],
 }
 
+REDACTION_JSON_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SQL Redaction Metadata Schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "mode",
+        "entries",
+    ],
+}
+
 INTEGRITY_TRACKED_FILES = [
     "original.sql",
     "obfuscated.sql",
@@ -88,6 +100,7 @@ def save_workspace_artifacts(
     mapping_payload: dict[str, Any],
     context_payload: dict[str, Any],
     llm_instructions_text: str | None = None,
+    redaction_payload: dict[str, Any] | None = None,
 ) -> None:
     try:
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -118,7 +131,15 @@ def save_workspace_artifacts(
     )
     _write_json(workspace_path / "mapping.json", mapping_payload)
     _write_json(workspace_path / "context.json", context)
-    _write_json(workspace_path / "integrity.json", _build_integrity_payload(workspace_path))
+    tracked_files = list(INTEGRITY_TRACKED_FILES)
+    if redaction_payload is not None:
+        _write_json(workspace_path / "redaction.schema.json", REDACTION_JSON_SCHEMA)
+        _write_json(workspace_path / "redaction.json", redaction_payload)
+        tracked_files.append("redaction.json")
+    _write_json(
+        workspace_path / "integrity.json",
+        _build_integrity_payload(workspace_path, tracked_files=tracked_files),
+    )
 
 
 def load_mapping_payload(mapping_path: Path) -> dict[str, Any]:
@@ -130,6 +151,12 @@ def load_mapping_payload(mapping_path: Path) -> dict[str, Any]:
 def load_context_payload(context_path: Path) -> dict[str, Any]:
     payload = _read_json(context_path)
     _validate_context_payload(payload, source=context_path)
+    return payload
+
+
+def load_redaction_payload(redaction_path: Path) -> dict[str, Any]:
+    payload = _read_json(redaction_path)
+    _validate_redaction_payload(payload, source=redaction_path)
     return payload
 
 
@@ -270,9 +297,9 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _build_integrity_payload(workspace_path: Path) -> dict[str, Any]:
+def _build_integrity_payload(workspace_path: Path, *, tracked_files: list[str]) -> dict[str, Any]:
     files: dict[str, str] = {}
-    for rel_path in INTEGRITY_TRACKED_FILES:
+    for rel_path in tracked_files:
         target = workspace_path / rel_path
         files[rel_path] = _sha256_file(target)
     return {
@@ -401,6 +428,15 @@ def _validate_context_payload(payload: dict[str, Any], *, source: Path) -> None:
     seed = payload.get("seed")
     if seed is not None and not isinstance(seed, int):
         raise WorkspaceError(f"context.json has invalid 'seed' in {source}")
+    optional_types = {
+        "redact_literals": bool,
+        "strip_comments": bool,
+        "redaction_mode": str,
+    }
+    for field, expected_type in optional_types.items():
+        value = payload.get(field)
+        if value is not None and not isinstance(value, expected_type):
+            raise WorkspaceError(f"context.json has invalid '{field}' in {source}")
 
 
 def _validate_integrity_payload(payload: dict[str, Any], *, source: Path) -> None:
@@ -413,6 +449,33 @@ def _validate_integrity_payload(payload: dict[str, Any], *, source: Path) -> Non
     files = payload.get("files")
     if not isinstance(files, dict):
         raise WorkspaceError(f"integrity.json missing/invalid field 'files' in {source}")
+
+
+def _validate_redaction_payload(payload: dict[str, Any], *, source: Path) -> None:
+    if payload.get("schema_version") != REDACTION_SCHEMA_VERSION:
+        raise WorkspaceError(
+            f"Unsupported redaction schema in {source}: {payload.get('schema_version')}"
+        )
+    if payload.get("mode") != "reversible":
+        raise WorkspaceError(f"Unsupported redaction mode in {source}: {payload.get('mode')}")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise WorkspaceError(f"redaction.json missing/invalid list field 'entries' in {source}")
+    for idx, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise WorkspaceError(f"redaction entry at index {idx} is not an object in {source}")
+        if not isinstance(entry.get("placeholder"), str):
+            raise WorkspaceError(
+                f"redaction entry {idx} missing/invalid field 'placeholder' in {source}"
+            )
+        if not isinstance(entry.get("original_this"), str):
+            raise WorkspaceError(
+                f"redaction entry {idx} missing/invalid field 'original_this' in {source}"
+            )
+        if not isinstance(entry.get("is_string"), bool):
+            raise WorkspaceError(
+                f"redaction entry {idx} missing/invalid field 'is_string' in {source}"
+            )
 
 
 def _default_llm_instructions(*, input_path: Path, dialect: str) -> str:

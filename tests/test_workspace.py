@@ -9,6 +9,7 @@ from sql_obfuscator.workspace import (
     default_workspace_path,
     load_context_payload,
     load_mapping_payload,
+    load_redaction_payload,
     save_translation_artifacts,
 )
 
@@ -70,3 +71,55 @@ def test_save_translation_artifacts_writes_report_and_optional_sql(tmp_path: Pat
     assert (workspace / "translated.sql").exists()
     assert (workspace / "reports" / "translation_report.json").exists()
     assert (workspace / "reports" / "translation_report.schema.json").exists()
+
+
+def test_load_redaction_payload_valid(tmp_path: Path):
+    redaction_path = tmp_path / "redaction.json"
+    redaction_path.write_text(
+        (
+            '{"schema_version": 1, "mode": "reversible", "entries": '
+            '[{"placeholder": "__SQL_OBFUSCATOR_STR_000001__", "original_this": "secret", "is_string": true}]}'
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_redaction_payload(redaction_path)
+    assert payload["schema_version"] == 1
+    assert payload["mode"] == "reversible"
+    assert len(payload["entries"]) == 1
+
+
+def test_load_redaction_payload_rejects_invalid_schema(tmp_path: Path):
+    redaction_path = tmp_path / "redaction.json"
+    redaction_path.write_text(
+        '{"schema_version": 2, "mode": "reversible", "entries": []}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="Unsupported redaction schema"):
+        load_redaction_payload(redaction_path)
+
+
+def test_load_redaction_payload_rejects_invalid_mode(tmp_path: Path):
+    redaction_path = tmp_path / "redaction.json"
+    redaction_path.write_text(
+        '{"schema_version": 1, "mode": "irreversible", "entries": []}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="Unsupported redaction mode"):
+        load_redaction_payload(redaction_path)
+
+
+def test_load_redaction_payload_rejects_invalid_entry_shape(tmp_path: Path):
+    redaction_path = tmp_path / "redaction.json"
+    redaction_path.write_text(
+        (
+            '{"schema_version": 1, "mode": "reversible", "entries": '
+            '[{"placeholder": "__SQL_OBFUSCATOR_STR_000001__", "original_this": 123, "is_string": true}]}'
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="missing/invalid field 'original_this'"):
+        load_redaction_payload(redaction_path)
