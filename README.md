@@ -1,6 +1,6 @@
 # SQL Identifier Obfuscator
 
-Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, aliases, temp tables) in T-SQL scripts with an AST-based pipeline.
+Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, aliases, temp tables) in SQL scripts across supported dialects (`tsql`, `hive`) using an AST-based pipeline.
 
 ## What It Does
 
