@@ -21,6 +21,10 @@ class MappingOccurrence:
     scope_id: str
     parent_kind: str
     role: str
+    statement_kind: str = ""
+    clause_kind: str = ""
+    node_kind: str = ""
+    arg_key: str = ""
     type_lexeme: str | None = None
 
 
@@ -67,6 +71,10 @@ class IdentifierRegistry:
         scope_id: str = "",
         parent_kind: str = "",
         role: str = "",
+        statement_kind: str = "",
+        clause_kind: str = "",
+        node_kind: str = "",
+        arg_key: str = "",
         type_lexeme: str | None = None,
     ) -> str:
         normalized = self._profile.normalize_identifier(raw_identifier)
@@ -90,6 +98,10 @@ class IdentifierRegistry:
                 scope_id=scope_id,
                 parent_kind=parent_kind,
                 role=role,
+                statement_kind=statement_kind,
+                clause_kind=clause_kind,
+                node_kind=node_kind,
+                arg_key=arg_key,
                 type_lexeme=type_lexeme,
             )
         )
@@ -126,6 +138,26 @@ class IdentifierRegistry:
                             "scope_id": occ.scope_id,
                             "parent_kind": occ.parent_kind,
                             "role": occ.role,
+                            **(
+                                {"statement_kind": occ.statement_kind}
+                                if occ.statement_kind
+                                else {}
+                            ),
+                            **(
+                                {"clause_kind": occ.clause_kind}
+                                if occ.clause_kind
+                                else {}
+                            ),
+                            **(
+                                {"node_kind": occ.node_kind}
+                                if occ.node_kind
+                                else {}
+                            ),
+                            **(
+                                {"arg_key": occ.arg_key}
+                                if occ.arg_key
+                                else {}
+                            ),
                             **(
                                 {"type_lexeme": occ.type_lexeme}
                                 if occ.type_lexeme is not None

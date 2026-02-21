@@ -21,12 +21,62 @@ def _node_context(
     parent_kind = type(node.parent).__name__.lower() if isinstance(node.parent, Expression) else ""
     node_kind = type(node).__name__.lower()
     arg_key = node.arg_key or ""
+    clause_kind = _clause_kind(node)
+    statement_kind = _statement_kind(node)
     return {
         "batch_index": batch_index,
         "statement_index": statement_index,
         "scope_id": f"b{batch_index}.s{statement_index}.{node_kind}.{arg_key}",
         "parent_kind": parent_kind,
+        "statement_kind": statement_kind,
+        "clause_kind": clause_kind,
+        "node_kind": node_kind,
+        "arg_key": arg_key,
     }
+
+
+def _clause_kind(node: Expression) -> str:
+    parent = node.parent
+    while isinstance(parent, Expression):
+        if isinstance(
+            parent,
+            (
+                exp.Select,
+                exp.From,
+                exp.Where,
+                exp.Join,
+                exp.Group,
+                exp.Order,
+                exp.Having,
+                exp.Qualify,
+                exp.Insert,
+                exp.Update,
+                exp.Delete,
+                exp.Create,
+            ),
+        ):
+            return type(parent).__name__.lower()
+        parent = parent.parent
+    return ""
+
+
+def _statement_kind(node: Expression) -> str:
+    parent: Expression | None = node
+    while isinstance(parent, Expression):
+        if isinstance(
+            parent,
+            (
+                exp.Select,
+                exp.Insert,
+                exp.Update,
+                exp.Delete,
+                exp.Create,
+                exp.Merge,
+            ),
+        ):
+            return type(parent).__name__.lower()
+        parent = parent.parent
+    return ""
 
 
 def _is_update_alias_target(table: exp.Table) -> bool:

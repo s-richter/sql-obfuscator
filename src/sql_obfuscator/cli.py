@@ -331,8 +331,10 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
         print(f"unknown_count: {report.get('unknown_count', 0)}")
         print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
+        print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
         print(f"unknown_by_kind: {report.get('unknown_by_kind', {})}")
         print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
+        print(f"low_confidence_by_kind: {report.get('low_confidence_by_kind', {})}")
         if redaction_report is not None:
             print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
             print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")

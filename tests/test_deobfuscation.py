@@ -26,6 +26,7 @@ def test_deobfuscate_roundtrip_recovers_identifiers():
     assert "mapped_identifiers" in report
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
+    assert report["low_confidence_count"] == 0
 
 
 def test_deobfuscate_reports_unknown_identifiers():
@@ -45,6 +46,7 @@ def test_deobfuscate_reports_unknown_identifiers():
     assert report["unknown_count"] > 0
     assert "unknown_by_kind" in report
     assert report["unknown_by_kind"]
+    assert "low_confidence_count" in report
     assert "recommendations" in report
     assert len(report["recommendations"]) > 0
 
@@ -142,3 +144,22 @@ def test_deobfuscate_roundtrip_preserves_numeric_type_lexeme():
     assert "OrderTotal NUMERIC(10, 2)" in deobfuscated_sql
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
+
+
+def test_deobfuscate_reports_low_confidence_after_statement_shift():
+    original_sql = "SELECT UserId FROM Users;"
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=42, pretty=False)
+    edited_obfuscated = f"SELECT 1; {obfuscated.output_sql}"
+
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        edited_obfuscated,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=False,
+    )
+
+    assert "UserId" in deobfuscated_sql
+    assert "Users" in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+    assert report["low_confidence_count"] > 0

@@ -213,6 +213,13 @@ Non-dry-run exit behavior:
 - `0` when no unresolved mappings/placeholders are found, or when `--allow-unresolved` is set
 - `1` when unresolved mappings/placeholders are found and `--allow-unresolved` is not set
 
+Dry-run diagnostics also include resolver confidence:
+
+- `low_confidence_count`
+- `low_confidence_by_kind`
+
+Low-confidence mappings are resolved heuristically and should be reviewed before production use.
+
 ### `roundtrip`
 
 ```bash
@@ -469,6 +476,22 @@ Actions:
 1. Ask LLM to keep alias/table structure closer to input.
 2. Avoid unnecessary alias rewrites.
 3. Re-validate with `--dry-run`.
+
+### Low-Confidence Mappings
+
+Symptoms:
+
+- `low_confidence_count > 0` in dry-run output/report.
+
+Meaning:
+
+- Identifier mapping succeeded, but resolver had to use relaxed/heuristic matching due to structural rewrite drift.
+
+Actions:
+
+1. Review de-obfuscated SQL manually before execution.
+2. Ask LLM to keep alias/table structure closer to obfuscated input.
+3. Re-run `--dry-run` after tightening prompt constraints.
 
 ### Integrity Check Failed
 
