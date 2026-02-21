@@ -3,7 +3,10 @@
 Python CLI tool for obfuscating SQL identifiers (table names, column names, CTE names, aliases, temp tables) in SQL scripts across supported dialects (`tsql`, `hive`) using an AST-based pipeline.
 
 Start here for a scenario-based walkthrough of commands, flags, and expected outputs:
+
 - [Command Tutorial](docs/COMMAND_TUTORIAL.md)
+
+**NOTE**: the code and the documentation in this repository was largely written by **GPT-5.3-Codex Medium**.
 
 ## What It Does
 
@@ -600,4 +603,3 @@ pytest tests/test_cli.py -q
 pytest tests/test_deobfuscation.py -q
 pytest tests/test_llm_workflow_integration.py -q
 ```
-
