@@ -95,6 +95,11 @@ def build_command_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Analyze de-obfuscation and print report summary without writing files",
     )
+    deobfuscate_parser.add_argument(
+        "--allow-unresolved",
+        action="store_true",
+        help="Allow unknown/ambiguous mappings in non-dry-run mode and still write outputs",
+    )
 
     roundtrip_parser = subparsers.add_parser(
         "roundtrip",
@@ -270,6 +275,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         mapping_payload=mapping_payload,
         context_payload=context_payload,
     )
+    has_unresolved = report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0
     if args.dry_run:
         print("deobfuscate dry-run summary:")
         print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
@@ -279,9 +285,15 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
         for recommendation in report.get("recommendations", []):
             print(f"recommendation: {recommendation}")
-        if report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0:
+        if has_unresolved:
             return 1
         return 0
+
+    if has_unresolved and not args.allow_unresolved:
+        raise WorkspaceError(
+            "De-obfuscation found unresolved mappings. "
+            "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
+        )
 
     output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
     _write_output_file(output_path, deobfuscated_sql)

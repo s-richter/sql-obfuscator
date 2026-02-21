@@ -167,11 +167,17 @@ Options:
 
 - `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
 - `--dry-run`: analyze and print summary only; does not write output/report files
+- `--allow-unresolved`: allow unknown/ambiguous mappings in non-dry-run mode and still write output/report files
 
 Dry-run exit behavior:
 
 - `0` when no unknown/ambiguous mappings
 - `1` when unknown/ambiguous mappings are found
+
+Non-dry-run exit behavior:
+
+- `0` when no unknown/ambiguous mappings are found, or when `--allow-unresolved` is set
+- `1` when unknown/ambiguous mappings are found and `--allow-unresolved` is not set
 
 ### `roundtrip`
 

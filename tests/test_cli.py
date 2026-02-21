@@ -239,6 +239,56 @@ def test_cli_deobfuscate_dry_run_unresolved_returns_nonzero(tmp_path: Path, caps
     assert "unknown_count" in captured.out
 
 
+def test_cli_deobfuscate_unresolved_non_dry_run_returns_nonzero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    edited_path = tmp_path / "edited.sql"
+    edited_path.write_text("SELECT unknown_identifier FROM unknown_table;", encoding="utf-8")
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "unresolved mappings" in captured.err
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists() is False
+    assert (tmp_path / "input.obf" / "reports" / "deobfuscation_report.json").exists() is False
+
+
+def test_cli_deobfuscate_allow_unresolved_writes_files(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    edited_path = tmp_path / "edited.sql"
+    edited_path.write_text("SELECT unknown_identifier FROM unknown_table;", encoding="utf-8")
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+            "--allow-unresolved",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists()
+    assert (tmp_path / "input.obf" / "reports" / "deobfuscation_report.json").exists()
+
+
 def test_cli_roundtrip_subcommand_works(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT [UserId] FROM Users;", encoding="utf-8")
