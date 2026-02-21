@@ -73,6 +73,17 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default="none",
         help="Redaction mode for obfuscated output (default: none)",
     )
+    parser.add_argument(
+        "--redaction-policy",
+        choices=("all", "strings-only", "sensitive"),
+        default="all",
+        help="Literal redaction policy (default: all)",
+    )
+    parser.add_argument(
+        "--redaction-sensitive-columns",
+        default="",
+        help="Comma-separated column names used when --redaction-policy sensitive",
+    )
 
 
 def _validate_redaction_args(args: argparse.Namespace) -> None:
@@ -81,6 +92,53 @@ def _validate_redaction_args(args: argparse.Namespace) -> None:
         raise WorkspaceError(
             "Redaction flags require --redaction-mode irreversible or --redaction-mode reversible."
         )
+    if args.redaction_policy == "sensitive" and not args.redaction_sensitive_columns.strip():
+        raise WorkspaceError(
+            "Sensitive redaction policy requires --redaction-sensitive-columns."
+        )
+    if args.redaction_policy != "sensitive" and args.redaction_sensitive_columns.strip():
+        raise WorkspaceError(
+            "--redaction-sensitive-columns requires --redaction-policy sensitive."
+        )
+
+
+def _parse_sensitive_columns(raw: str) -> set[str]:
+    if not raw.strip():
+        return set()
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def _add_deobfuscate_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to workspace folder created during obfuscation",
+    )
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to edited obfuscated SQL script",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output path for de-obfuscated SQL",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Analyze de-obfuscation and print report summary without writing files",
+    )
+    parser.add_argument(
+        "--allow-unresolved",
+        action="store_true",
+        help="Allow unknown/ambiguous mappings in non-dry-run mode and still write outputs",
+    )
+    parser.add_argument(
+        "--allow-low-confidence",
+        action="store_true",
+        help="Allow low-confidence mappings in non-dry-run mode and still write outputs",
+    )
 
 
 def build_command_parser() -> argparse.ArgumentParser:
@@ -101,31 +159,13 @@ def build_command_parser() -> argparse.ArgumentParser:
         "deobfuscate",
         help="De-obfuscate an edited obfuscated SQL script using workspace artifacts",
     )
-    deobfuscate_parser.add_argument(
-        "--workspace",
-        required=True,
-        help="Path to workspace folder created during obfuscation",
+    _add_deobfuscate_args(deobfuscate_parser)
+
+    validate_before_write_parser = subparsers.add_parser(
+        "validate-before-write",
+        help="Validate de-obfuscation safety first, then write output if checks pass",
     )
-    deobfuscate_parser.add_argument(
-        "--input",
-        required=True,
-        help="Path to edited obfuscated SQL script",
-    )
-    deobfuscate_parser.add_argument(
-        "--out",
-        default=None,
-        help="Optional output path for de-obfuscated SQL",
-    )
-    deobfuscate_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Analyze de-obfuscation and print report summary without writing files",
-    )
-    deobfuscate_parser.add_argument(
-        "--allow-unresolved",
-        action="store_true",
-        help="Allow unknown/ambiguous mappings in non-dry-run mode and still write outputs",
-    )
+    _add_deobfuscate_args(validate_before_write_parser)
 
     roundtrip_parser = subparsers.add_parser(
         "roundtrip",
@@ -268,6 +308,8 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         redact_literals=args.redact_literals,
         strip_comments=args.strip_comments,
         redaction_mode=args.redaction_mode,
+        redaction_policy=args.redaction_policy,
+        sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     output_sql = result.output_sql
     _write_output_file(_output_path_for_input(input_path), output_sql)
@@ -293,12 +335,14 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_deobfuscate_command(args: argparse.Namespace) -> int:
-    workspace_path = Path(args.workspace)
+def _deobfuscate_pipeline(
+    *,
+    workspace_path: Path,
+    input_path: Path,
+) -> tuple[str, dict, dict]:
     validate_workspace_integrity(workspace_path)
     mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
     context_payload = load_context_payload(workspace_path / "context.json")
-    input_path = Path(args.input)
     edited_sql = _read_sql_file(input_path)
 
     deobfuscated_sql, report = deobfuscate_sql_with_report(
@@ -317,8 +361,12 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
             redaction_payload=redaction_payload,
         )
         report["redaction"] = redaction_report
+    return deobfuscated_sql, report, context_payload
 
+
+def _evaluate_deobfuscation_safety(report: dict) -> tuple[bool, bool]:
     redaction_unresolved = False
+    redaction_report = report.get("redaction")
     if redaction_report is not None:
         redaction_unresolved = (
             redaction_report.get("unknown_placeholder_count", 0) > 0
@@ -326,6 +374,18 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         )
     has_unresolved = report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0
     has_unresolved = has_unresolved or redaction_unresolved
+    has_low_confidence = report.get("low_confidence_count", 0) > 0
+    return has_unresolved, has_low_confidence
+
+
+def _run_deobfuscate_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    input_path = Path(args.input)
+    deobfuscated_sql, report, _ = _deobfuscate_pipeline(
+        workspace_path=workspace_path,
+        input_path=input_path,
+    )
+    has_unresolved, has_low_confidence = _evaluate_deobfuscation_safety(report)
     if args.dry_run:
         print("deobfuscate dry-run summary:")
         print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
@@ -335,7 +395,8 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         print(f"unknown_by_kind: {report.get('unknown_by_kind', {})}")
         print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
         print(f"low_confidence_by_kind: {report.get('low_confidence_by_kind', {})}")
-        if redaction_report is not None:
+        redaction_report = report.get("redaction")
+        if isinstance(redaction_report, dict):
             print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
             print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
         for recommendation in report.get("recommendations", []):
@@ -349,6 +410,11 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
             "De-obfuscation found unresolved mappings. "
             "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
         )
+    if has_low_confidence and not args.allow_low_confidence:
+        raise WorkspaceError(
+            "De-obfuscation found low-confidence mappings. "
+            "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
+        )
 
     output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
     _write_output_file(output_path, deobfuscated_sql)
@@ -357,6 +423,48 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=deobfuscated_sql,
         report_payload=report,
     )
+    print(deobfuscated_sql)
+    return 0
+
+
+def _run_validate_before_write_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    input_path = Path(args.input)
+    deobfuscated_sql, report, _ = _deobfuscate_pipeline(
+        workspace_path=workspace_path,
+        input_path=input_path,
+    )
+    has_unresolved, has_low_confidence = _evaluate_deobfuscation_safety(report)
+
+    print("validate-before-write summary:")
+    print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
+    print(f"unknown_count: {report.get('unknown_count', 0)}")
+    print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
+    print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
+    redaction_report = report.get("redaction")
+    if isinstance(redaction_report, dict):
+        print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
+        print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
+
+    if has_unresolved and not args.allow_unresolved:
+        raise WorkspaceError(
+            "Validation failed: unresolved mappings found. "
+            "Use --allow-unresolved to force output."
+        )
+    if has_low_confidence and not args.allow_low_confidence:
+        raise WorkspaceError(
+            "Validation failed: low-confidence mappings found. "
+            "Use --allow-low-confidence to force output."
+        )
+
+    output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
+    _write_output_file(output_path, deobfuscated_sql)
+    save_deobfuscation_artifacts(
+        workspace_path=workspace_path,
+        deobfuscated_sql=deobfuscated_sql,
+        report_payload=report,
+    )
+    print("validation passed: wrote de-obfuscated output")
     print(deobfuscated_sql)
     return 0
 
@@ -375,6 +483,8 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         redact_literals=args.redact_literals,
         strip_comments=args.strip_comments,
         redaction_mode=args.redaction_mode,
+        redaction_policy=args.redaction_policy,
+        sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     obfuscated_sql = obfuscation.output_sql
     _write_output_file(_output_path_for_input(input_path), obfuscated_sql)
@@ -466,6 +576,8 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     if deobfuscation_report.get("unknown_count", 0) > 0:
         return 1
     if deobfuscation_report.get("ambiguous_count", 0) > 0:
+        return 1
+    if deobfuscation_report.get("low_confidence_count", 0) > 0:
         return 1
     redaction_report = deobfuscation_report.get("redaction")
     if isinstance(redaction_report, dict):
@@ -591,6 +703,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_deobfuscate_command(args)
         if args.command == "roundtrip":
             return _run_roundtrip_command(args)
+        if args.command == "validate-before-write":
+            return _run_validate_before_write_command(args)
         if args.command == "workspace-info":
             return _run_workspace_info_command(args)
         if args.command == "translate":

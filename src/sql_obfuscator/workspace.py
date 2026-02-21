@@ -206,10 +206,12 @@ def save_deobfuscation_artifacts(
                 f"mapped_identifiers: {report_payload.get('mapped_identifiers', 0)}",
                 f"unknown_count: {report_payload.get('unknown_count', 0)}",
                 f"ambiguous_count: {report_payload.get('ambiguous_count', 0)}",
+                f"low_confidence_count: {report_payload.get('low_confidence_count', 0)}",
                 f"batch_count: {report_payload.get('batch_count', 0)}",
                 f"statement_count: {report_payload.get('statement_count', 0)}",
                 f"unknown_by_kind: {report_payload.get('unknown_by_kind', {})}",
                 f"ambiguous_by_kind: {report_payload.get('ambiguous_by_kind', {})}",
+                f"low_confidence_by_kind: {report_payload.get('low_confidence_by_kind', {})}",
                 "recommendations:",
                 *[
                     f"- {line}"
@@ -439,11 +441,18 @@ def _validate_context_payload(payload: dict[str, Any], *, source: Path) -> None:
         "redact_literals": bool,
         "strip_comments": bool,
         "redaction_mode": str,
+        "redaction_policy": str,
     }
     for field, expected_type in optional_types.items():
         value = payload.get(field)
         if value is not None and not isinstance(value, expected_type):
             raise WorkspaceError(f"context.json has invalid '{field}' in {source}")
+    sensitive_columns = payload.get("sensitive_columns")
+    if sensitive_columns is not None:
+        if not isinstance(sensitive_columns, list):
+            raise WorkspaceError(f"context.json has invalid 'sensitive_columns' in {source}")
+        if any(not isinstance(item, str) for item in sensitive_columns):
+            raise WorkspaceError(f"context.json has invalid 'sensitive_columns' in {source}")
 
 
 def _validate_integrity_payload(payload: dict[str, Any], *, source: Path) -> None:
@@ -496,9 +505,11 @@ def _default_llm_instructions(*, input_path: Path, dialect: str) -> str:
         "## Requirements\n"
         "1. Keep obfuscated identifiers unchanged whenever possible.\n"
         "2. Do not invent new table/column names unless absolutely required.\n"
-        "3. Keep alias structure stable where possible.\n"
-        "4. Prefer structural/query-plan improvements over renaming.\n"
-        "5. Preserve SQL semantics unless explicitly asked to change behavior.\n\n"
+        "3. Keep alias structure stable and avoid renaming aliases.\n"
+        "4. Do not rewrite JOIN graph, CTE hierarchy, or table lineage unless required.\n"
+        "5. Preserve placeholder literals exactly when present (for reversible redaction).\n"
+        "6. Prefer local predicate/projection optimizations over large structural rewrites.\n"
+        "7. Preserve SQL semantics unless explicitly asked to change behavior.\n\n"
         "## If new identifiers are unavoidable\n"
         "- Minimize the number of new identifiers.\n"
         "- Keep new identifiers syntactically valid for the dialect.\n"

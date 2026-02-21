@@ -91,6 +91,8 @@ def obfuscate_sql(
     redact_literals: bool = False,
     strip_comments: bool = False,
     redaction_mode: str = "none",
+    redaction_policy: str = "all",
+    sensitive_columns: set[str] | None = None,
 ) -> str:
     result = obfuscate_sql_with_metadata(
         script,
@@ -101,6 +103,8 @@ def obfuscate_sql(
         redact_literals=redact_literals,
         strip_comments=strip_comments,
         redaction_mode=redaction_mode,
+        redaction_policy=redaction_policy,
+        sensitive_columns=sensitive_columns,
     )
     return result.output_sql
 
@@ -115,11 +119,24 @@ def obfuscate_sql_with_metadata(
     redact_literals: bool = False,
     strip_comments: bool = False,
     redaction_mode: str = "none",
+    redaction_policy: str = "all",
+    sensitive_columns: set[str] | None = None,
 ) -> ObfuscationResult:
     del strict_go  # reserved for future strict GO edge-case handling
+    redaction_result = apply_redaction(
+        script,
+        dialect=dialect,
+        pretty=pretty,
+        redact_literals=redact_literals,
+        strip_comments=strip_comments,
+        redaction_mode=redaction_mode,
+        redaction_policy=redaction_policy,
+        sensitive_columns=sensitive_columns,
+    )
+    redaction_input_sql = redaction_result.output_sql
     profile = get_dialect_profile(dialect)
     registry = IdentifierRegistry(profile=profile, seed=seed)
-    batches = profile.split_batches(script)
+    batches = profile.split_batches(redaction_input_sql)
     transformed_batches = []
     total_statements = 0
     for batch_idx, batch in enumerate(batches, start=1):
@@ -137,15 +154,6 @@ def obfuscate_sql_with_metadata(
             total_statements += len(parse(batch, dialect=dialect))
 
     output_sql = profile.join_batches(transformed_batches)
-    redaction_result = apply_redaction(
-        output_sql,
-        dialect=dialect,
-        pretty=pretty,
-        redact_literals=redact_literals,
-        strip_comments=strip_comments,
-        redaction_mode=redaction_mode,
-    )
-    output_sql = redaction_result.output_sql
     mapping_payload = registry.mapping_payload()
     context_payload = {
         "schema_version": 1,
@@ -155,6 +163,8 @@ def obfuscate_sql_with_metadata(
         "redact_literals": redact_literals,
         "strip_comments": strip_comments,
         "redaction_mode": redaction_mode,
+        "redaction_policy": redaction_policy,
+        "sensitive_columns": sorted(sensitive_columns or []),
         "batch_count": len(batches),
         "statement_count": total_statements,
         "mapping_entry_count": len(mapping_payload["entries"]),

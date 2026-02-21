@@ -12,6 +12,7 @@ from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
 
 ALLOWED_REDACTION_MODES = {"none", "irreversible", "reversible"}
+ALLOWED_REDACTION_POLICIES = {"all", "strings-only", "sensitive"}
 _STRING_PLACEHOLDER_PREFIX = "__SQL_OBFUSCATOR_STR_"
 _STRING_PLACEHOLDER_SUFFIX = "__"
 _NUMERIC_PLACEHOLDER_BASE = 900_000_000_000
@@ -32,9 +33,13 @@ def apply_redaction(
     redact_literals: bool,
     strip_comments: bool,
     redaction_mode: str,
+    redaction_policy: str = "all",
+    sensitive_columns: set[str] | None = None,
 ) -> RedactionResult:
     if redaction_mode not in ALLOWED_REDACTION_MODES:
         raise WorkspaceError(f"Unsupported redaction mode: {redaction_mode}")
+    if redaction_policy not in ALLOWED_REDACTION_POLICIES:
+        raise WorkspaceError(f"Unsupported redaction policy: {redaction_policy}")
     if redaction_mode == "none":
         return RedactionResult(output_sql=script, redaction_payload=None)
     if not redact_literals and not strip_comments:
@@ -67,6 +72,8 @@ def apply_redaction(
                 redact_literals=redact_literals,
                 strip_comments=strip_comments,
                 redaction_mode=redaction_mode,
+                redaction_policy=redaction_policy,
+                sensitive_columns=sensitive_columns or set(),
                 literal_entries=literal_entries,
                 next_index=_next_literal_index,
             )
@@ -94,6 +101,8 @@ def _redact_statement(
     redact_literals: bool,
     strip_comments: bool,
     redaction_mode: str,
+    redaction_policy: str,
+    sensitive_columns: set[str],
     literal_entries: list[dict[str, Any]],
     next_index,
 ) -> Expression:
@@ -101,7 +110,11 @@ def _redact_statement(
         if strip_comments and hasattr(node, "comments"):
             node.comments = None
         if redact_literals and isinstance(node, exp.Literal):
-            if _should_skip_literal_redaction(node):
+            if not _should_redact_literal(
+                node,
+                redaction_policy=redaction_policy,
+                sensitive_columns=sensitive_columns,
+            ):
                 return node
             if redaction_mode == "irreversible":
                 value = "<REDACTED_STR>" if node.is_string else "0"
@@ -129,6 +142,40 @@ def _should_skip_literal_redaction(node: exp.Literal) -> bool:
     while isinstance(parent, Expression):
         if isinstance(parent, (exp.DataTypeParam, exp.DataType)):
             return True
+        parent = parent.parent
+    return False
+
+
+def _should_redact_literal(
+    node: exp.Literal,
+    *,
+    redaction_policy: str,
+    sensitive_columns: set[str],
+) -> bool:
+    if _should_skip_literal_redaction(node):
+        return False
+    if redaction_policy == "all":
+        return True
+    if redaction_policy == "strings-only":
+        return node.is_string
+    return _is_sensitive_literal_context(node, sensitive_columns)
+
+
+def _is_sensitive_literal_context(node: exp.Literal, sensitive_columns: set[str]) -> bool:
+    if not sensitive_columns:
+        return False
+    parent = node.parent
+    while isinstance(parent, Expression):
+        if isinstance(parent, (exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE, exp.Like, exp.ILike, exp.Between)):
+            for identifier in parent.find_all(exp.Identifier):
+                if identifier.name.lower() in sensitive_columns:
+                    return True
+        if isinstance(parent, exp.In):
+            lhs = parent.args.get("this")
+            if isinstance(lhs, exp.Column):
+                col = lhs.this
+                if isinstance(col, exp.Identifier) and col.name.lower() in sensitive_columns:
+                    return True
         parent = parent.parent
     return False
 

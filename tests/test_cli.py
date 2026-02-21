@@ -421,6 +421,162 @@ def test_cli_deobfuscate_allow_unresolved_writes_files(tmp_path: Path, capsys):
     assert (tmp_path / "input.obf" / "reports" / "deobfuscation_report.json").exists()
 
 
+def test_cli_deobfuscate_low_confidence_non_dry_run_returns_nonzero(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path = tmp_path / "edited_low_conf.sql"
+    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "low-confidence mappings" in captured.err
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists() is False
+
+
+def test_cli_deobfuscate_allow_low_confidence_writes_files(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path = tmp_path / "edited_low_conf.sql"
+    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+            "--allow-low-confidence",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists()
+    report = json.loads(
+        (tmp_path / "input.obf" / "reports" / "deobfuscation_report.json").read_text(encoding="utf-8")
+    )
+    assert report["low_confidence_count"] > 0
+
+
+def test_cli_validate_before_write_fails_on_low_confidence_by_default(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path = tmp_path / "edited_low_conf.sql"
+    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+
+    rc = main(
+        [
+            "validate-before-write",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Validation failed: low-confidence mappings found" in captured.err
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists() is False
+
+
+def test_cli_validate_before_write_allow_low_confidence_writes_output(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path = tmp_path / "edited_low_conf.sql"
+    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+
+    rc = main(
+        [
+            "validate-before-write",
+            "--workspace",
+            str(tmp_path / "input.obf"),
+            "--input",
+            str(edited_path),
+            "--allow-low-confidence",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists()
+
+
+def test_cli_obfuscate_sensitive_redaction_policy_requires_columns(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT email FROM users WHERE email = 'a@b.com';", encoding="utf-8")
+
+    rc = main(
+        [
+            "obfuscate",
+            str(sql_file),
+            "--redaction-mode",
+            "irreversible",
+            "--redact-literals",
+            "--redaction-policy",
+            "sensitive",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "requires --redaction-sensitive-columns" in captured.err
+
+
+def test_cli_obfuscate_sensitive_redaction_policy_redacts_configured_columns(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "SELECT email FROM users WHERE email = 'a@b.com' AND status = 'active';",
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "obfuscate",
+            str(sql_file),
+            "--redaction-mode",
+            "irreversible",
+            "--redact-literals",
+            "--redaction-policy",
+            "sensitive",
+            "--redaction-sensitive-columns",
+            "email",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "a@b.com" not in captured.out
+    assert "active" in captured.out
+
+
 def test_cli_roundtrip_subcommand_works(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT [UserId] FROM Users;", encoding="utf-8")

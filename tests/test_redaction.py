@@ -220,3 +220,35 @@ def test_reversible_redaction_skips_numeric_datatype_params_and_restores_values(
     assert "NUMERIC(10, 2)" in restored_sql or "NUMERIC(10,2)" in restored_sql
     assert " = 42" in restored_sql
     assert report["missing_placeholder_count"] == 0
+
+
+def test_strings_only_policy_redacts_only_strings():
+    sql = "SELECT 'secret' AS s, 42 AS n;"
+    result = apply_redaction(
+        sql,
+        dialect="tsql",
+        pretty=False,
+        redact_literals=True,
+        strip_comments=False,
+        redaction_mode="irreversible",
+        redaction_policy="strings-only",
+    )
+    assert "<REDACTED_STR>" in result.output_sql
+    assert "42" in result.output_sql
+
+
+def test_sensitive_policy_redacts_only_configured_column_literals():
+    sql = "SELECT * FROM users WHERE email = 'a@b.com' AND status = 'active' AND score = 42;"
+    result = apply_redaction(
+        sql,
+        dialect="tsql",
+        pretty=False,
+        redact_literals=True,
+        strip_comments=False,
+        redaction_mode="irreversible",
+        redaction_policy="sensitive",
+        sensitive_columns={"email", "score"},
+    )
+    assert "a@b.com" not in result.output_sql
+    assert "42" not in result.output_sql
+    assert "active" in result.output_sql

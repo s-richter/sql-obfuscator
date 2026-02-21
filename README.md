@@ -50,6 +50,9 @@ python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_r
 # De-obfuscate and write restored SQL
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
 
+# Validate first, then write only if checks pass
+python obfuscator.py validate-before-write --workspace script.obf --input script.obf/llm_response_obfuscated.sql
+
 # One-command verification loop
 python obfuscator.py roundtrip script.sql --diff-report
 
@@ -64,6 +67,7 @@ python obfuscator.py workspace-info --workspace script.obf
 
 - `obfuscate`: Obfuscate SQL and create workspace artifacts.
 - `deobfuscate`: Reverse obfuscation using workspace mapping/context.
+- `validate-before-write`: Validate de-obfuscation safety and write output only when checks pass.
 - `roundtrip`: Obfuscate and immediately de-obfuscate for verification.
 - `translate`: Translate SQL between supported dialects with optional validation/reporting.
 - `workspace-info`: Show workspace artifact/report status and integrity info.
@@ -184,6 +188,8 @@ Options:
 - `--strip-comments`: remove SQL comments from obfuscated output
 - `--redact-literals`: redact string/numeric literals in obfuscated output
 - `--redaction-mode <none|irreversible|reversible>`: redaction behavior (default: `none`)
+- `--redaction-policy <all|strings-only|sensitive>`: literal redaction policy (default: `all`)
+- `--redaction-sensitive-columns <csv>`: required when policy is `sensitive`
 
 Output:
 
@@ -202,6 +208,7 @@ Options:
 - `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
 - `--dry-run`: analyze and print summary only; does not write output/report files
 - `--allow-unresolved`: allow unknown/ambiguous mappings in non-dry-run mode and still write output/report files
+- `--allow-low-confidence`: allow low-confidence mappings in non-dry-run mode and still write output/report files
 
 Dry-run exit behavior:
 
@@ -210,8 +217,11 @@ Dry-run exit behavior:
 
 Non-dry-run exit behavior:
 
-- `0` when no unresolved mappings/placeholders are found, or when `--allow-unresolved` is set
-- `1` when unresolved mappings/placeholders are found and `--allow-unresolved` is not set
+- `0` when no unresolved mappings/placeholders and no low-confidence mappings are found
+- `0` when unresolved mappings are explicitly overridden with `--allow-unresolved`
+- `0` when low-confidence mappings are explicitly overridden with `--allow-low-confidence`
+- `1` when unresolved mappings/placeholders are found without `--allow-unresolved`
+- `1` when low-confidence mappings are found without `--allow-low-confidence`
 
 Dry-run diagnostics also include resolver confidence:
 
@@ -219,6 +229,23 @@ Dry-run diagnostics also include resolver confidence:
 - `low_confidence_by_kind`
 
 Low-confidence mappings are resolved heuristically and should be reviewed before production use.
+
+### `validate-before-write`
+
+```bash
+python obfuscator.py validate-before-write --workspace <dir> --input <edited_obfuscated.sql> [options]
+```
+
+Behavior:
+
+- Runs validation checks first (unresolved + low-confidence + reversible-redaction placeholder checks).
+- Writes output/report artifacts only if checks pass (or are explicitly overridden).
+
+Options:
+
+- `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
+- `--allow-unresolved`: explicit override for unresolved mapping checks
+- `--allow-low-confidence`: explicit override for low-confidence mapping checks
 
 ### `roundtrip`
 
@@ -239,6 +266,7 @@ Roundtrip always writes a normalized comparison set:
 - `reports/roundtrip_normalized_diff.txt`
 
 `roundtrip_report.json` includes both raw and normalized match metrics.
+`roundtrip` returns non-zero if unresolved or low-confidence mappings are detected.
 
 ### `workspace-info`
 
@@ -316,6 +344,12 @@ python obfuscator.py obfuscate sample_sql/04_temporary_tables.sql --instruction-
 
 ```bash
 python obfuscator.py obfuscate script.sql --redaction-mode irreversible --redact-literals --strip-comments
+```
+
+### Selective Redaction Policy (Sensitive Columns Only)
+
+```bash
+python obfuscator.py obfuscate script.sql --redaction-mode irreversible --redact-literals --redaction-policy sensitive --redaction-sensitive-columns email,ssn,token
 ```
 
 ### Redaction For Roundtrip Restoration (Reversible)
@@ -492,6 +526,7 @@ Actions:
 1. Review de-obfuscated SQL manually before execution.
 2. Ask LLM to keep alias/table structure closer to obfuscated input.
 3. Re-run `--dry-run` after tightening prompt constraints.
+4. Only if you explicitly accept the risk, run with `--allow-low-confidence`.
 
 ### Integrity Check Failed
 

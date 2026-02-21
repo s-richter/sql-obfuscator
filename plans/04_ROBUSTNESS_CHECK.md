@@ -10,52 +10,56 @@ The app already matches the core intended workflow:
 Current implementation provides strong building blocks for this:
 - AST-based obfuscation/de-obfuscation.
 - Workspace artifacts and integrity checks.
-- Dry-run diagnostics for unresolved mappings.
+- Dry-run diagnostics for unresolved and low-confidence mappings.
+- Validation-first command path via `validate-before-write`.
 - Translation stage support for `tsql` and `hive`.
 
 ## Findings (Ordered by Impact)
 
-### 1. Non-dry-run de-obfuscation can succeed even with unresolved mappings (High)
-In current CLI behavior:
-- `deobfuscate --dry-run` returns non-zero when `unknown_count` or `ambiguous_count` is non-zero.
-- `deobfuscate` (non-dry-run) writes output and returns success without enforcing the same failure gate.
+### 1. Non-dry-run de-obfuscation can succeed even with unresolved mappings (Addressed)
+Current CLI behavior:
+- `deobfuscate --dry-run` returns non-zero when unresolved identifiers/placeholders are found.
+- `deobfuscate` (non-dry-run) fails by default when unresolved mappings are detected.
+- Explicit override exists via `--allow-unresolved`.
 
 Risk:
-- Users can get a "successful" run with partially unresolved identifiers, then execute unsafe or broken SQL.
+- Low residual risk when users do not use override flags.
 
 Recommendation:
-- Fail non-dry-run by default when unresolved mappings exist.
-- Add explicit override flag (for advanced users), e.g. `--allow-unresolved`.
+- Keep current default.
+- Retain `--allow-unresolved` as an explicit advanced override.
 
-### 2. Privacy protection is identifier-focused only (High)
-Obfuscation currently focuses on identifiers (tables, columns, aliases, etc.), not full content redaction.
+### 2. Privacy protection is identifier-focused only (Addressed)
+Obfuscation now supports optional literal/comment redaction with reversible restoration.
 
 Risk:
-- Sensitive literals, business constants, or comments may still be exposed to the LLM.
+- Residual risk remains when redaction is not enabled.
 
 Recommendation:
-- Add optional redaction mode for literals/comments before LLM export.
-- Keep de-obfuscation compatibility by storing reversible placeholders where needed.
+- Keep current redaction modes and policy options (`all`, `strings-only`, `sensitive`).
+- Keep using reversible mode only when literal restoration is required after LLM edits.
 
-### 3. Resolver robustness declines with heavy LLM rewrites (Medium)
-Reverse mapping resolution uses obfuscated token + kind + limited scope hints.
+### 3. Resolver robustness declines with heavy LLM rewrites (Addressed with Residual Risk)
+Resolver now uses enriched context and multi-pass matching with confidence diagnostics.
 
 Risk:
-- Large structural rewrites by the LLM (alias reshaping, scope changes) increase ambiguous/unknown mappings.
+- Very heavy structural rewrites can still produce unresolved or low-confidence mappings.
 
 Recommendation:
-- Enrich mapping context (stronger scope fingerprints).
-- Add stricter prompt guidance and automated checks before final de-obfuscation.
+- Keep multi-pass/context-based resolver and confidence diagnostics as default.
+- Keep prompt guardrails and rewrite constraints in workspace guidance.
 
-### 4. Safety depends on user discipline (`--dry-run`) (Medium)
-The platform has safety diagnostics, but they are optional in practice.
+### 4. Safety depends on user discipline (`--dry-run`) (Addressed)
+Default non-dry-run behavior now enforces:
+- unresolved mapping gate (`--allow-unresolved` override required)
+- low-confidence gate (`--allow-low-confidence` override required)
 
 Risk:
-- Production workflow may skip dry-run and miss unresolved mapping warnings.
+- Residual risk is mainly tied to explicit override usage.
 
 Recommendation:
-- Provide a strict mode default or a `validate-before-write` command path.
-- Document this as the recommended default in README examples.
+- Keep strict-by-default behavior and explicit override flags (`--allow-unresolved`, `--allow-low-confidence`).
+- Keep `validate-before-write` as the safe validation-first path in documented workflows.
 
 ### 5. Cross-dialect translation is useful but structural (Low/Expected)
 Translation support is correctly isolated and report-driven, but semantic equivalence is not guaranteed.
@@ -67,15 +71,15 @@ Recommendation:
 - Keep current behavior, but make this limitation explicit in user guidance and reports.
 
 ## Overall Assessment
-The app is directionally strong and already usable for the intended LLM workflow.
-The most important missing piece is **hard safety enforcement on non-dry-run de-obfuscation**.
-Fixing that first would materially improve reliability with minimal complexity.
+The app is directionally strong and usable for the intended LLM workflow.
+The original highest-risk gaps are now implemented end-to-end: unresolved/low-confidence safety gates, reversible/irreversible redaction, context-aware resolver matching, and a dedicated validation-first command path.
+Primary remaining work is incremental hardening, semantic validation depth, and operational UX polish.
 
 ## Suggested Next Implementation Steps
-1. Enforce unresolved-mapping failure in non-dry-run de-obfuscation by default.
-2. Add optional `--allow-unresolved` escape hatch.
-3. Add optional literal/comment redaction mode for LLM-bound SQL.
-4. Improve resolver context to tolerate bigger LLM structural rewrites.
+1. Add optional semantic-drift validation (for example, statement-shape checks) in `validate-before-write`.
+2. Expand rewrite-heavy regression fixtures to stress confidence scoring and ambiguous remapping paths.
+3. Add report-level triage hints for low-confidence matches (recommended manual review targets by clause/object kind).
+4. Add optional strict profile presets for privacy redaction (for example, preset bundles for policy + mode + comment handling).
 
 ## Draft: Privacy Redaction Design (Item 2)
 
@@ -192,14 +196,14 @@ When redaction is enabled:
 - Integration:
   - obfuscate(redaction enabled) -> LLM-like edit -> deobfuscate path validates expected behavior.
 
-## Phased Rollout Recommendation
-1. Phase 1 (low risk): `--strip-comments` + `--redact-literals` in `irreversible` mode.
-2. Phase 2: add `reversible` mode with `redaction.json` and unresolved-redaction diagnostics.
-3. Phase 3: optional policy-driven selective redaction rules.
+## Phased Rollout Recommendation (Status)
+1. Phase 1 completed: `--strip-comments` + `--redact-literals` in `irreversible` mode.
+2. Phase 2 completed: `reversible` mode with `redaction.json` and unresolved-redaction diagnostics.
+3. Phase 3 completed (baseline): policy-driven redaction options (`all`, `strings-only`, `sensitive`).
 
 ## Recommendation
-Ship AST-based redaction with `irreversible` mode first, and treat reversible restoration as a second milestone.
-Do not use regex as the primary implementation strategy.
+Keep AST-based redaction as the primary strategy and continue avoiding regex as the core privacy control.
+Use policy-driven redaction and strict de-obfuscation validation as default operational guidance.
 
 ## Implementation Task List (Privacy Redaction)
 

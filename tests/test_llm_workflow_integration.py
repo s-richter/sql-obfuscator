@@ -267,3 +267,49 @@ def test_llm_style_edit_with_reversible_redaction_restores_literals(tmp_path: Pa
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
     assert report.get("redaction", {}).get("missing_placeholder_count", 0) == 0
+
+
+def test_validate_before_write_blocks_heavy_rewrite_until_explicit_override(tmp_path: Path, capsys):
+    sql_file = tmp_path / "rewrite_heavy.sql"
+    sql_file.write_text(
+        """
+        SELECT u.UserId, u.UserName
+        FROM Users u
+        WHERE u.Status = 1;
+        """,
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "rewrite_heavy.obf"
+    assert main(["obfuscate", str(sql_file), "--workspace", str(workspace), "--seed", "7"]) == 0
+    capsys.readouterr()
+
+    obfuscated_sql = (workspace / "obfuscated.sql").read_text(encoding="utf-8")
+    edited_path = workspace / "llm_response_obfuscated.sql"
+    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+
+    rc = main(
+        [
+            "validate-before-write",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(edited_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "low-confidence mappings found" in captured.err
+
+    rc = main(
+        [
+            "validate-before-write",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(edited_path),
+            "--allow-low-confidence",
+        ]
+    )
+    capsys.readouterr()
+    assert rc == 0
+    assert (workspace / "deobfuscated.sql").exists()
