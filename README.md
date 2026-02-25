@@ -246,12 +246,18 @@ Behavior:
 
 - Runs validation checks first (unresolved + low-confidence + reversible-redaction placeholder checks).
 - Writes output/report artifacts only if checks pass (or are explicitly overridden).
+- Intended as a write path (not a no-write validation path).
 
 Options:
 
 - `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
 - `--allow-unresolved`: explicit override for unresolved mapping checks
 - `--allow-low-confidence`: explicit override for low-confidence mapping checks
+- `--dry-run`: currently accepted by CLI help, but currently still writes output/report artifacts in `validate-before-write`.
+
+Current recommendation:
+
+- Use `deobfuscate --dry-run` when you need validation with guaranteed no file writes.
 
 ### `roundtrip`
 

@@ -366,6 +366,7 @@ WHERE t1.c2 = 'value';
 What this does:
 
 - Validation-first path: runs checks, writes output only when safety checks pass.
+- This command is intended to write on success. For no-write validation, use `deobfuscate --dry-run`.
 
 Command:
 
@@ -378,10 +379,12 @@ python obfuscator.py validate-before-write \
 Command options used:
 
 - same base inputs as `deobfuscate`, but command enforces validation-first workflow.
+- `--dry-run` appears in CLI help for this command, but current behavior still writes outputs.
 
 Expected result:
 
 - Writes `deobfuscated.sql` only if no unresolved mappings/placeholders and no low-confidence violations (unless explicit overrides are passed).
+- If `--dry-run` is passed to `validate-before-write`, current behavior still writes output/report files; use `deobfuscate --dry-run` instead when no writes are required.
 
 Example expected SQL output (`deobfuscated.sql`):
 
