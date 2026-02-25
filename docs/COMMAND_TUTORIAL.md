@@ -14,6 +14,10 @@ Note on examples:
 - The identifier replacements right now (2026-02-21) are animal based.
 - If `--seed` is not set, exact animal identifier names can differ between runs.
 - The app uses `sqlglot` to parse, and the SQL output is formatted with the option `pretty=True`, meaning the SQL output in the examples below doesn't keep the format used in the SQL input.
+- You can use `-` as input for `obfuscate`, `roundtrip`, and `translate --input -` to read SQL from stdin.
+- You can use `--stdout-only` to print SQL output without writing sibling/default SQL output files.
+- `--output-dir` is for file inputs, and cannot be combined with `--stdout-only`.
+- For `translate`, `--out` cannot be combined with `--output-dir`, and `--stdout-only` cannot be combined with `--report-only`.
 
 ## Key Terms (used throughout)
 
@@ -41,6 +45,12 @@ Note on examples:
 - Quick quality check in one command: [8) `roundtrip`](#s8)
 - Cross-dialect conversion: [9) `translate`](#s9)
 - Inspect workspace/report health: [10) `workspace-info`](#s10)
+- Control where SQL outputs are written: [11) `--stdout-only` and `--output-dir`](#s11)
+- Use installed command instead of wrapper script: [12) Installed CLI (`sql-obfuscator`)](#s12)
+- Pipe workflows without temp files: [13) Stdin pipeline workflows](#s13)
+- Choose the right translate write mode: [14) `translate` output mode matrix](#s14)
+- Enforce strict batch separator handling: [15) `--strict-go` pass/fail examples](#s15)
+- Diagnose failures quickly: [16) Troubleshooting by exit code](#s16)
 
 <a id="s1"></a>
 
@@ -366,7 +376,6 @@ WHERE t1.c2 = 'value';
 What this does:
 
 - Validation-first path: runs checks, writes output only when safety checks pass.
-- This command is intended to write on success. For no-write validation, use `deobfuscate --dry-run`.
 
 Command:
 
@@ -379,12 +388,10 @@ python obfuscator.py validate-before-write \
 Command options used:
 
 - same base inputs as `deobfuscate`, but command enforces validation-first workflow.
-- `--dry-run` appears in CLI help for this command, but current behavior still writes outputs.
 
 Expected result:
 
 - Writes `deobfuscated.sql` only if no unresolved mappings/placeholders and no low-confidence violations (unless explicit overrides are passed).
-- If `--dry-run` is passed to `validate-before-write`, current behavior still writes output/report files; use `deobfuscate --dry-run` instead when no writes are required.
 
 Example expected SQL output (`deobfuscated.sql`):
 
@@ -422,6 +429,7 @@ python obfuscator.py roundtrip sample.sql --diff-report
 Command options used:
 
 - `--diff-report`: writes textual diff artifacts for inspection.
+- `--strict-go` (optional): fail if `GO` appears in unsupported non-standalone forms when strict batch handling is required.
 
 Expected result:
 
@@ -472,7 +480,7 @@ Command options used:
 
 Expected result:
 
-- A translated SQL output file is written (unless `--report-only`).
+- A translated SQL output file is written unless `--report-only` or `--stdout-only` is used.
 - Translation summary reports statement failures/warnings.
 
 Example expected SQL output (`sample_hive.sql`):
@@ -516,6 +524,216 @@ Example expected SQL output:
 ```sql
 -- This command prints workspace/report metadata; it does not generate SQL output.
 ```
+
+<a id="s11"></a>
+
+## 11) `--stdout-only` and `--output-dir`
+
+SQL input:
+
+```sql
+SELECT UserId, UserName
+FROM Users;
+```
+
+What this does:
+
+- `--stdout-only`: prints SQL output without creating default sibling SQL output files.
+- `--output-dir`: writes generated SQL output files to a chosen directory for CI/artifact collection.
+
+Commands:
+
+```bash
+# Print obfuscated SQL only, still create workspace artifacts
+python obfuscator.py obfuscate sample.sql --stdout-only
+
+# Write obfuscated output file into artifacts/sql/
+python obfuscator.py obfuscate sample.sql --output-dir artifacts/sql
+
+# Print translated SQL only
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --stdout-only
+
+# Write translated SQL into artifacts/sql/
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --output-dir artifacts/sql
+```
+
+Expected result:
+
+- `--stdout-only` skips default sibling output SQL files.
+- `--output-dir` writes SQL files into the specified directory.
+- Both modes keep normal command validation/exit behavior.
+
+<a id="s12"></a>
+
+## 12) Installed CLI (`sql-obfuscator`)
+
+What this does:
+
+- Uses the installable console entry point instead of `python obfuscator.py`.
+- Keeps command behavior and flags identical.
+
+Commands:
+
+```bash
+# Show top-level help
+sql-obfuscator --help
+
+# Obfuscate
+sql-obfuscator obfuscate sample.sql
+
+# Translate and validate
+sql-obfuscator translate --input sample.sql --source-dialect tsql --target-dialect hive --validate
+```
+
+Expected result:
+
+- Same outputs and exit behavior as wrapper-script invocation.
+- Useful for CI/dev environments where the package is installed in a virtual environment.
+
+<a id="s13"></a>
+
+## 13) Stdin pipeline workflows
+
+SQL input source (shell pipeline):
+
+```sql
+SELECT account_id, token
+FROM auth.sessions;
+```
+
+What this does:
+
+- Runs commands without creating an input file.
+- Supports automation where SQL is streamed from another process.
+
+Commands:
+
+```bash
+# Obfuscate from stdin (workspace defaults to stdin.obf)
+cat sample.sql | python obfuscator.py obfuscate - --seed 42
+
+# Roundtrip from stdin with diff artifact
+cat sample.sql | python obfuscator.py roundtrip - --diff-report
+
+# Translate from stdin and print translated SQL
+cat sample.sql | python obfuscator.py translate --input - --source-dialect tsql --target-dialect hive
+```
+
+Expected result:
+
+- `obfuscate -` and `roundtrip -` create `stdin.obf/` unless `--workspace` is provided.
+- No sibling file such as `*_obfuscated.sql` is created for stdin input.
+- `translate --input -` prints translated SQL to stdout when `--out` and `--output-dir` are not set.
+
+<a id="s14"></a>
+
+## 14) `translate` output mode matrix
+
+What this does:
+
+- Clarifies where translated SQL is written/printed for each output mode.
+- Makes invalid flag combinations explicit for predictable CI behavior.
+
+Commands:
+
+```bash
+# Default: writes sibling output file
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive
+
+# Explicit output file
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --out out/hive.sql
+
+# Output directory mode
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --output-dir artifacts/sql
+
+# Stdout-only mode
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --stdout-only
+
+# Report-only mode (no translated SQL write)
+python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --report-only
+```
+
+Expected result:
+
+- Default/file input: translated SQL file is written next to input.
+- `--out`: translated SQL is written only to the specified path.
+- `--output-dir`: translated SQL is written in the specified directory.
+- `--stdout-only`: translated SQL is printed, no translated SQL file is written.
+- `--report-only`: no translated SQL file is written; summary/report artifacts only.
+- Invalid combinations fail fast:
+  - `--out` + `--output-dir`
+  - `--stdout-only` + `--report-only`
+  - `--stdout-only` + `--out`
+  - `--stdout-only` + `--output-dir`
+
+<a id="s15"></a>
+
+## 15) `--strict-go` pass/fail examples
+
+SQL input (valid strict case):
+
+```sql
+SELECT 1;
+GO
+SELECT 2;
+```
+
+SQL input (invalid strict case):
+
+```sql
+SELECT 1; GO
+SELECT 2;
+```
+
+What this does:
+
+- Enforces strict handling of T-SQL `GO` batch separators.
+- Fails when `GO` is used in unsupported non-standalone form.
+
+Commands:
+
+```bash
+# Valid strict usage
+python obfuscator.py obfuscate valid_go.sql --strict-go
+
+# Invalid strict usage (expected failure)
+python obfuscator.py obfuscate invalid_go.sql --strict-go
+```
+
+Expected result:
+
+- Valid case succeeds and writes normal artifacts.
+- Invalid case exits non-zero with a strict-go validation error.
+- Without `--strict-go`, backward-compatible behavior is preserved.
+
+<a id="s16"></a>
+
+## 16) Troubleshooting by exit code
+
+What this does:
+
+- Provides a fast path to classify failures during local runs and CI.
+- Maps common non-zero exits to likely causes and next actions.
+
+Exit code guide:
+
+- `0`: command succeeded.
+- `1`: command failed due to input/validation/runtime errors.
+
+Common failure patterns and actions:
+
+- `deobfuscate` or `validate-before-write` fails:
+  - Cause: unresolved/ambiguous/low-confidence mappings, missing placeholders, or integrity issues.
+  - Action: run `workspace-info`, then run `deobfuscate --dry-run` to inspect summary counts before deciding on override flags.
+- `translate` fails:
+  - Cause: source parse errors, target emission/validation errors, or invalid flag combinations.
+  - Action: retry with `--workspace` and inspect `reports/translation_report.json`; remove conflicting flags (`--out` + `--output-dir`, `--stdout-only` combinations).
+- `obfuscate`/`roundtrip` fails with strict GO mode:
+  - Cause: `GO` used in non-standalone form while `--strict-go` is enabled.
+  - Action: rewrite to standalone `GO` lines or rerun without `--strict-go` if strict enforcement is not required.
+- `workspace-info` fails:
+  - Cause: workspace path missing or required artifacts/checksums invalid.
+  - Action: verify workspace path, then regenerate workspace from the original input if integrity artifacts are missing/tampered.
 
 ## Common safe workflow (recommended)
 

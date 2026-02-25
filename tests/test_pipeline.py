@@ -75,3 +75,25 @@ def test_no_pretty_output_is_compact():
     result = obfuscate_sql(sql, pretty=False, seed=1)
 
     assert "\n" not in result
+
+
+def test_strict_go_rejects_non_standalone_go_line():
+    sql = "SELECT 1;\nGO -- separator comment\nSELECT 2;"
+    with pytest.raises(ParseScriptError) as exc_info:
+        obfuscate_sql(sql, dialect="tsql", strict_go=True)
+
+    assert "Strict GO validation failed" in str(exc_info.value)
+
+
+def test_strict_go_allows_standalone_go_line():
+    sql = "SELECT 1;\nGO\nSELECT 2;"
+    result = obfuscate_sql(sql, dialect="tsql", strict_go=True)
+
+    assert "GO" in result
+
+
+def test_non_strict_go_preserves_backward_compatible_behavior():
+    sql = "SELECT 1;\nGO\nSELECT 2;"
+    result = obfuscate_sql(sql, dialect="tsql", strict_go=False)
+
+    assert "GO" in result

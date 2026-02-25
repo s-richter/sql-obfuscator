@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
@@ -93,6 +94,130 @@ def test_cli_parse_error_does_not_write_output_file(tmp_path: Path, capsys):
     output_file = tmp_path / "invalid_obfuscated.sql"
     assert rc == 1
     assert not output_file.exists()
+
+
+def test_cli_obfuscate_stdin_writes_workspace_and_stdout(tmp_path: Path, monkeypatch, capsys):
+    workspace = tmp_path / "stdin_ws.obf"
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT UserId FROM Users;"))
+
+    rc = main(["obfuscate", "-", "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "SELECT" in captured.out
+    assert (workspace / "original.sql").exists()
+    assert (workspace / "obfuscated.sql").exists()
+
+
+def test_cli_obfuscate_stdout_only_skips_sibling_output_file(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--stdout-only"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "SELECT" in captured.out
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (tmp_path / "input.obf" / "obfuscated.sql").exists()
+
+
+def test_cli_obfuscate_output_dir_writes_output_file_to_directory(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    out_dir = tmp_path / "outputs"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--output-dir", str(out_dir)])
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (out_dir / "input_obfuscated.sql").exists()
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+
+
+def test_cli_obfuscate_output_dir_rejects_stdin_input(tmp_path: Path, monkeypatch, capsys):
+    out_dir = tmp_path / "outputs"
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT 1;"))
+
+    rc = main(["obfuscate", "-", "--output-dir", str(out_dir)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--output-dir requires file input" in captured.err
+
+
+def test_cli_obfuscate_stdout_only_conflicts_with_output_dir(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    out_dir = tmp_path / "outputs"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--stdout-only", "--output-dir", str(out_dir)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--stdout-only and --output-dir cannot be used together" in captured.err
+
+
+def test_cli_roundtrip_stdin_works(tmp_path: Path, monkeypatch, capsys):
+    workspace = tmp_path / "stdin_roundtrip.obf"
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT UserId FROM Users;"))
+
+    rc = main(["roundtrip", "-", "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "SELECT" in captured.out
+    assert (workspace / "deobfuscated.sql").exists()
+    assert (workspace / "reports" / "roundtrip_report.json").exists()
+
+
+def test_cli_roundtrip_stdout_only_skips_sibling_obfuscated_output_file(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    rc = main(["roundtrip", str(sql_file), "--stdout-only"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "SELECT" in captured.out
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (tmp_path / "input.obf" / "deobfuscated.sql").exists()
+
+
+def test_cli_roundtrip_output_dir_writes_obfuscated_output_file_to_directory(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    out_dir = tmp_path / "outputs"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    rc = main(["roundtrip", str(sql_file), "--output-dir", str(out_dir)])
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (out_dir / "input_obfuscated.sql").exists()
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+
+
+def test_cli_roundtrip_output_dir_rejects_stdin_input(tmp_path: Path, monkeypatch, capsys):
+    out_dir = tmp_path / "outputs"
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT 1;"))
+
+    rc = main(["roundtrip", "-", "--output-dir", str(out_dir)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--output-dir requires file input" in captured.err
+
+
+def test_cli_roundtrip_stdout_only_conflicts_with_output_dir(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    out_dir = tmp_path / "outputs"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    rc = main(["roundtrip", str(sql_file), "--stdout-only", "--output-dir", str(out_dir)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--stdout-only and --output-dir cannot be used together" in captured.err
 
 
 def test_cli_pretty_writes_pretty_output_file(tmp_path: Path, capsys):
@@ -529,6 +654,58 @@ def test_cli_validate_before_write_allow_low_confidence_writes_output(tmp_path: 
     assert (tmp_path / "input.obf" / "deobfuscated.sql").exists()
 
 
+def test_cli_validate_before_write_rejects_dry_run_flag(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "validate-before-write",
+                "--workspace",
+                str(tmp_path / "input.obf"),
+                "--input",
+                str(sql_file),
+                "--dry-run",
+            ]
+        )
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --dry-run" in captured.err
+
+
+def test_cli_roundtrip_help_describes_diff_report_flag(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        main(["roundtrip", "-h"])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 0
+    assert "--diff-report" in captured.out
+    assert "Write unified diff to reports/roundtrip_diff.txt" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_fragments"),
+    [
+        ("obfuscate", ["sql_file", "--strict-go", "--stdout-only", "--output-dir"]),
+        ("deobfuscate", ["--workspace", "--input", "--dry-run", "--allow-unresolved"]),
+        ("validate-before-write", ["--workspace", "--input", "--allow-low-confidence"]),
+        ("roundtrip", ["sql_file", "--diff-report", "--stdout-only", "--output-dir"]),
+        ("translate", ["--input", "--source-dialect", "--target-dialect", "--stdout-only", "--output-dir"]),
+        ("workspace-info", ["--workspace"]),
+    ],
+)
+def test_cli_help_contract_includes_expected_options(command: str, expected_fragments: list[str], capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        main([command, "-h"])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 0
+    for fragment in expected_fragments:
+        assert fragment in captured.out
+
+
 def test_cli_obfuscate_sensitive_redaction_policy_requires_columns(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT email FROM users WHERE email = 'a@b.com';", encoding="utf-8")
@@ -610,6 +787,17 @@ def test_cli_roundtrip_diff_report_file(tmp_path: Path, capsys):
 
     assert rc == 0
     assert (tmp_path / "input.obf" / "reports" / "roundtrip_diff.txt").exists()
+
+
+def test_cli_obfuscate_strict_go_rejects_unsupported_separator_form(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;\nGO -- comment\nSELECT 2;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--strict-go"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Strict GO validation failed" in captured.err
 
 
 def test_cli_uses_custom_instruction_template(tmp_path: Path, capsys):
@@ -843,3 +1031,214 @@ def test_cli_translate_workspace_default_translated_sql(tmp_path: Path, capsys):
     assert rc == 0
     assert (workspace / "translated.sql").exists()
     assert (workspace / "reports" / "translation_report.json").exists()
+
+
+def test_cli_translate_stdin_prints_translated_sql(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT TOP 1 UserId FROM Users;"))
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            "-",
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "translate summary:" in captured.out
+    assert "LIMIT 1" in captured.out
+
+
+def test_cli_translate_stdout_only_skips_default_output_file(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT TOP 1 UserId FROM Users;", encoding="utf-8")
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--stdout-only",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "translate summary:" in captured.out
+    assert "LIMIT 1" in captured.out
+    assert (tmp_path / "input_hive.sql").exists() is False
+
+
+def test_cli_translate_output_dir_writes_translated_output_to_directory(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    out_dir = tmp_path / "translated"
+    sql_file.write_text("SELECT TOP 1 UserId FROM Users;", encoding="utf-8")
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (out_dir / "input_hive.sql").exists()
+    assert (tmp_path / "input_hive.sql").exists() is False
+
+
+def test_cli_translate_output_dir_rejects_stdin_input(tmp_path: Path, monkeypatch, capsys):
+    out_dir = tmp_path / "translated"
+    monkeypatch.setattr("sys.stdin", io.StringIO("SELECT TOP 1 UserId FROM Users;"))
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            "-",
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--output-dir requires file input" in captured.err
+
+
+def test_cli_translate_output_dir_conflicts_with_out(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+    out_file = tmp_path / "translated.sql"
+    out_dir = tmp_path / "translated"
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--out",
+            str(out_file),
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--out and --output-dir cannot be used together" in captured.err
+
+
+def test_cli_translate_stdout_only_conflicts_with_output_dir(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+    out_dir = tmp_path / "translated"
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--stdout-only",
+            "--output-dir",
+            str(out_dir),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--stdout-only and --output-dir cannot be used together" in captured.err
+
+
+def test_cli_translate_stdout_only_conflicts_with_out(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+    out_file = tmp_path / "translated.sql"
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--out",
+            str(out_file),
+            "--stdout-only",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--out and --stdout-only cannot be used together" in captured.err
+
+
+def test_cli_translate_stdout_only_conflicts_with_report_only(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    rc = main(
+        [
+            "translate",
+            "--input",
+            str(sql_file),
+            "--source-dialect",
+            "tsql",
+            "--target-dialect",
+            "hive",
+            "--report-only",
+            "--stdout-only",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "--report-only and --stdout-only cannot be used together" in captured.err
+
+
+def test_cli_stdin_seed_determinism_obfuscate(tmp_path: Path, monkeypatch, capsys):
+    ws1 = tmp_path / "ws1.obf"
+    ws2 = tmp_path / "ws2.obf"
+    sql = "SELECT UserId, UserName FROM Users;"
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(sql))
+    rc1 = main(["obfuscate", "-", "--workspace", str(ws1), "--seed", "42"])
+    capsys.readouterr()
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(sql))
+    rc2 = main(["obfuscate", "-", "--workspace", str(ws2), "--seed", "42"])
+    capsys.readouterr()
+
+    assert rc1 == 0
+    assert rc2 == 0
+    assert (ws1 / "obfuscated.sql").read_text(encoding="utf-8") == (ws2 / "obfuscated.sql").read_text(encoding="utf-8")

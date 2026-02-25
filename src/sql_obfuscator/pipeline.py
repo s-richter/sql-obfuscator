@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from sqlglot import parse
@@ -11,6 +12,9 @@ from .errors import ParseScriptError
 from .redaction import apply_redaction
 from .registry import IdentifierRegistry
 from .transformer import transform_statements
+
+_GO_STANDALONE_RE = re.compile(r"^\s*GO\s*$", re.IGNORECASE)
+_GO_PREFIX_RE = re.compile(r"^\s*GO\b", re.IGNORECASE)
 
 
 def _extract_context_snippet(sql: str, max_length: int = 100) -> str:
@@ -73,6 +77,18 @@ def _process_batch(
     )
 
 
+def _validate_strict_go(script: str, *, dialect: str) -> None:
+    if dialect.lower() != "tsql":
+        return
+    for line_number, line in enumerate(script.splitlines(), start=1):
+        if _GO_PREFIX_RE.match(line) and not _GO_STANDALONE_RE.match(line):
+            snippet = line.strip()[:100]
+            raise ParseScriptError(
+                "Strict GO validation failed: unsupported batch separator form at "
+                f"line {line_number}: {snippet!r}. Use standalone 'GO' on its own line."
+            )
+
+
 @dataclass
 class ObfuscationResult:
     output_sql: str
@@ -122,7 +138,8 @@ def obfuscate_sql_with_metadata(
     redaction_policy: str = "all",
     sensitive_columns: set[str] | None = None,
 ) -> ObfuscationResult:
-    del strict_go  # reserved for future strict GO edge-case handling
+    if strict_go:
+        _validate_strict_go(script, dialect=dialect)
     redaction_result = apply_redaction(
         script,
         dialect=dialect,

@@ -50,7 +50,7 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strict-go",
         action="store_true",
-        help="Fail if batch separators cannot be handled safely",
+        help="Fail when T-SQL GO separators are not standalone lines",
     )
     parser.add_argument(
         "--instruction-template",
@@ -84,6 +84,16 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default="",
         help="Comma-separated column names used when --redaction-policy sensitive",
     )
+    parser.add_argument(
+        "--stdout-only",
+        action="store_true",
+        help="Print SQL to stdout without writing sibling output files",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional directory for obfuscated output files (file input only)",
+    )
 
 
 def _validate_redaction_args(args: argparse.Namespace) -> None:
@@ -108,7 +118,11 @@ def _parse_sensitive_columns(raw: str) -> set[str]:
     return {part.strip().lower() for part in raw.split(",") if part.strip()}
 
 
-def _add_deobfuscate_args(parser: argparse.ArgumentParser) -> None:
+def _add_deobfuscate_args(
+    parser: argparse.ArgumentParser,
+    *,
+    include_dry_run: bool = True,
+) -> None:
     parser.add_argument(
         "--workspace",
         required=True,
@@ -124,11 +138,12 @@ def _add_deobfuscate_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Optional output path for de-obfuscated SQL",
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Analyze de-obfuscation and print report summary without writing files",
-    )
+    if include_dry_run:
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Analyze de-obfuscation and print report summary without writing files",
+        )
     parser.add_argument(
         "--allow-unresolved",
         action="store_true",
@@ -152,31 +167,31 @@ def build_command_parser() -> argparse.ArgumentParser:
         "obfuscate",
         help="Obfuscate a SQL script and persist workspace artifacts",
     )
-    obfuscate_parser.add_argument("sql_file", help="Path to input .sql file")
+    obfuscate_parser.add_argument("sql_file", help="Path to input .sql file, or '-' for stdin")
     _add_common_obfuscation_args(obfuscate_parser)
 
     deobfuscate_parser = subparsers.add_parser(
         "deobfuscate",
         help="De-obfuscate an edited obfuscated SQL script using workspace artifacts",
     )
-    _add_deobfuscate_args(deobfuscate_parser)
+    _add_deobfuscate_args(deobfuscate_parser, include_dry_run=True)
 
     validate_before_write_parser = subparsers.add_parser(
         "validate-before-write",
         help="Validate de-obfuscation safety first, then write output if checks pass",
     )
-    _add_deobfuscate_args(validate_before_write_parser)
+    _add_deobfuscate_args(validate_before_write_parser, include_dry_run=False)
 
     roundtrip_parser = subparsers.add_parser(
         "roundtrip",
         help="Obfuscate and immediately de-obfuscate for verification",
     )
-    roundtrip_parser.add_argument("sql_file", help="Path to input .sql file")
+    roundtrip_parser.add_argument("sql_file", help="Path to input .sql file, or '-' for stdin")
     _add_common_obfuscation_args(roundtrip_parser)
     roundtrip_parser.add_argument(
         "--diff-report",
         action="store_true",
-        help="Reserved for future roundtrip diff reporting",
+        help="Write unified diff to reports/roundtrip_diff.txt",
     )
 
     translate_parser = subparsers.add_parser(
@@ -186,7 +201,7 @@ def build_command_parser() -> argparse.ArgumentParser:
     translate_parser.add_argument(
         "--input",
         required=True,
-        help="Path to input .sql file",
+        help="Path to input .sql file, or '-' for stdin",
     )
     translate_parser.add_argument(
         "--source-dialect",
@@ -226,6 +241,16 @@ def build_command_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip writing translated SQL and only emit report/summary",
     )
+    translate_parser.add_argument(
+        "--stdout-only",
+        action="store_true",
+        help="Print translated SQL to stdout without writing output SQL files",
+    )
+    translate_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional directory for translated SQL output files (file input only)",
+    )
 
     workspace_info_parser = subparsers.add_parser(
         "workspace-info",
@@ -250,6 +275,16 @@ def _read_sql_file(path: Path) -> str:
         raise InputFileError(f"Unable to read input file: {path}") from exc
 
 
+def _read_sql_source(path_or_stdin: str) -> tuple[str, Path | None]:
+    if path_or_stdin == "-":
+        try:
+            return sys.stdin.read(), None
+        except OSError as exc:
+            raise InputFileError("Unable to read SQL from stdin.") from exc
+    path = Path(path_or_stdin)
+    return _read_sql_file(path), path
+
+
 def _output_path_for_input(path: Path) -> Path:
     if path.suffix:
         return path.with_name(f"{path.stem}_obfuscated{path.suffix}")
@@ -260,6 +295,29 @@ def _translation_output_path_for_input(path: Path, *, target_dialect: str) -> Pa
     if path.suffix:
         return path.with_name(f"{path.stem}_{target_dialect}{path.suffix}")
     return path.with_name(f"{path.name}_{target_dialect}.sql")
+
+
+def _resolve_output_path_for_input(
+    input_path: Path | None,
+    *,
+    output_dir: str | None,
+    builder,
+    context: str,
+) -> Path | None:
+    if output_dir is None:
+        if input_path is None:
+            return None
+        return builder(input_path)
+    if input_path is None:
+        raise WorkspaceError(f"{context}: --output-dir requires file input (not stdin).")
+    output_dir_path = Path(output_dir)
+    if output_dir_path.exists() and not output_dir_path.is_dir():
+        raise WorkspaceError(f"{context}: --output-dir is not a directory: {output_dir_path}")
+    try:
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(f"{context}: unable to create --output-dir: {output_dir_path}") from exc
+    return output_dir_path / builder(input_path).name
 
 
 def _write_output_file(path: Path, content: str) -> None:
@@ -297,8 +355,10 @@ def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
 
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
     _validate_redaction_args(args)
-    input_path = Path(args.sql_file)
-    sql_text = _read_sql_file(input_path)
+    if args.stdout_only and args.output_dir:
+        raise WorkspaceError("obfuscate: --stdout-only and --output-dir cannot be used together.")
+    sql_text, input_path = _read_sql_source(args.sql_file)
+    input_reference = input_path if input_path is not None else Path("stdin.sql")
     result = obfuscate_sql_with_metadata(
         sql_text,
         dialect=args.dialect,
@@ -312,13 +372,20 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     output_sql = result.output_sql
-    _write_output_file(_output_path_for_input(input_path), output_sql)
+    output_path = _resolve_output_path_for_input(
+        input_path,
+        output_dir=args.output_dir,
+        builder=_output_path_for_input,
+        context="obfuscate",
+    )
+    if output_path is not None and not args.stdout_only:
+        _write_output_file(output_path, output_sql)
     llm_instructions_text = _read_optional_template(args.instruction_template)
 
-    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_path)
+    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
         workspace_path=workspace_path,
-        input_path=input_path,
+        input_path=input_reference,
         original_sql=sql_text,
         obfuscated_sql=output_sql,
         mapping_payload=result.mapping_payload,
@@ -471,8 +538,10 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
 
 def _run_roundtrip_command(args: argparse.Namespace) -> int:
     _validate_redaction_args(args)
-    input_path = Path(args.sql_file)
-    original_sql = _read_sql_file(input_path)
+    if args.stdout_only and args.output_dir:
+        raise WorkspaceError("roundtrip: --stdout-only and --output-dir cannot be used together.")
+    original_sql, input_path = _read_sql_source(args.sql_file)
+    input_reference = input_path if input_path is not None else Path("stdin.sql")
 
     obfuscation = obfuscate_sql_with_metadata(
         original_sql,
@@ -487,13 +556,20 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     obfuscated_sql = obfuscation.output_sql
-    _write_output_file(_output_path_for_input(input_path), obfuscated_sql)
+    output_path = _resolve_output_path_for_input(
+        input_path,
+        output_dir=args.output_dir,
+        builder=_output_path_for_input,
+        context="roundtrip",
+    )
+    if output_path is not None and not args.stdout_only:
+        _write_output_file(output_path, obfuscated_sql)
     llm_instructions_text = _read_optional_template(args.instruction_template)
 
-    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_path)
+    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
         workspace_path=workspace_path,
-        input_path=input_path,
+        input_path=input_reference,
         original_sql=original_sql,
         obfuscated_sql=obfuscated_sql,
         mapping_payload=obfuscation.mapping_payload,
@@ -649,8 +725,15 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
 
 
 def _run_translate_command(args: argparse.Namespace) -> int:
-    input_path = Path(args.input)
-    sql_text = _read_sql_file(input_path)
+    sql_text, input_path = _read_sql_source(args.input)
+    if args.out and args.stdout_only:
+        raise WorkspaceError("translate: --out and --stdout-only cannot be used together.")
+    if args.report_only and args.stdout_only:
+        raise WorkspaceError("translate: --report-only and --stdout-only cannot be used together.")
+    if args.stdout_only and args.output_dir:
+        raise WorkspaceError("translate: --stdout-only and --output-dir cannot be used together.")
+    if args.out and args.output_dir:
+        raise WorkspaceError("translate: --out and --output-dir cannot be used together.")
     result = translate_sql_with_report(
         sql_text,
         source_dialect=args.source_dialect,
@@ -683,12 +766,22 @@ def _run_translate_command(args: argparse.Namespace) -> int:
     if args.report_only:
         return 0
 
-    output_path = (
-        Path(args.out)
-        if args.out
-        else _translation_output_path_for_input(input_path, target_dialect=args.target_dialect)
-    )
-    _write_output_file(output_path, result.output_sql)
+    if args.out:
+        _write_output_file(Path(args.out), result.output_sql)
+        return 0
+    if not args.stdout_only:
+        output_path = _resolve_output_path_for_input(
+            input_path,
+            output_dir=args.output_dir,
+            builder=lambda p: _translation_output_path_for_input(p, target_dialect=args.target_dialect),
+            context="translate",
+        )
+        if output_path is None:
+            print(result.output_sql)
+            return 0
+        _write_output_file(output_path, result.output_sql)
+        return 0
+    print(result.output_sql)
     return 0
 
 

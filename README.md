@@ -23,6 +23,12 @@ Start here for a scenario-based walkthrough of commands, flags, and expected out
 pip install -e .
 ```
 
+Installed CLI command:
+
+```bash
+sql-obfuscator --help
+```
+
 For development:
 
 ```bash
@@ -40,6 +46,12 @@ pip install -r requirements.txt
 ```bash
 # Obfuscate (default workspace: script.obf)
 python obfuscator.py obfuscate script.sql
+
+# Obfuscate from stdin (workspace defaults to stdin.obf)
+cat script.sql | python obfuscator.py obfuscate -
+
+# Obfuscate from file but skip sibling output file write
+python obfuscator.py obfuscate script.sql --stdout-only
 
 # Obfuscate deterministically
 python obfuscator.py obfuscate script.sql --seed 42
@@ -64,6 +76,12 @@ python obfuscator.py roundtrip script.sql --diff-report
 
 # Translate SQL between dialects
 python obfuscator.py translate --input script.sql --source-dialect tsql --target-dialect hive --validate
+
+# Translate from file and print translated SQL only
+python obfuscator.py translate --input script.sql --source-dialect tsql --target-dialect hive --stdout-only
+
+# Translate from stdin to stdout
+cat script.sql | python obfuscator.py translate --input - --source-dialect tsql --target-dialect hive
 
 # Check workspace health/status (includes integrity check)
 python obfuscator.py workspace-info --workspace script.obf
@@ -180,7 +198,7 @@ If checksums do not match, `deobfuscate`, `roundtrip`, and `workspace-info` fail
 ### `obfuscate`
 
 ```bash
-python obfuscator.py obfuscate <input.sql> [options]
+python obfuscator.py obfuscate <input.sql|-> [options]
 ```
 
 Options:
@@ -189,19 +207,22 @@ Options:
 - `--dialect <name>`: parser dialect (default: `tsql`)
 - `--seed <int>`: deterministic mapping seed
 - `--pretty` / `--no-pretty`: formatted output on/off (default: `--pretty`)
-- `--strict-go`: accepted but currently no-op (reserved)
+- `--strict-go`: fail when a line starts with `GO` but is not a standalone batch separator line
 - `--instruction-template <path>`: custom `llm_instructions.md` template
 - `--strip-comments`: remove SQL comments from obfuscated output
 - `--redact-literals`: redact string/numeric literals in obfuscated output
 - `--redaction-mode <none|irreversible|reversible>`: redaction behavior (default: `none`)
 - `--redaction-policy <all|strings-only|sensitive>`: literal redaction policy (default: `all`)
 - `--redaction-sensitive-columns <csv>`: required when policy is `sensitive`
+- `--stdout-only`: print obfuscated SQL to stdout without writing sibling output file
+- `--output-dir <dir>`: write obfuscated output file into a specific directory (file input only)
 
 Output:
 
 - Prints obfuscated SQL to stdout
-- Writes sibling output file `<input_stem>_obfuscated<ext>`
+- Writes sibling output file `<input_stem>_obfuscated<ext>` (file input only, unless `--stdout-only` is used)
 - Writes workspace artifacts
+- If input is `-` (stdin), no sibling output file is written; workspace default is `stdin.obf`
 
 ### `deobfuscate`
 
@@ -246,23 +267,17 @@ Behavior:
 
 - Runs validation checks first (unresolved + low-confidence + reversible-redaction placeholder checks).
 - Writes output/report artifacts only if checks pass (or are explicitly overridden).
-- Intended as a write path (not a no-write validation path).
 
 Options:
 
 - `--out <path>`: output file path (default: `<workspace>/deobfuscated.sql`)
 - `--allow-unresolved`: explicit override for unresolved mapping checks
 - `--allow-low-confidence`: explicit override for low-confidence mapping checks
-- `--dry-run`: currently accepted by CLI help, but currently still writes output/report artifacts in `validate-before-write`.
-
-Current recommendation:
-
-- Use `deobfuscate --dry-run` when you need validation with guaranteed no file writes.
 
 ### `roundtrip`
 
 ```bash
-python obfuscator.py roundtrip <input.sql> [options]
+python obfuscator.py roundtrip <input.sql|-> [options]
 ```
 
 Uses obfuscation options from `obfuscate` (`--workspace`, `--seed`, `--pretty`, etc.).
@@ -270,6 +285,8 @@ Uses obfuscation options from `obfuscate` (`--workspace`, `--seed`, `--pretty`, 
 Additional option:
 
 - `--diff-report`: writes unified diff to `reports/roundtrip_diff.txt`
+- `--stdout-only`: skip sibling obfuscated output file write while still producing workspace/report artifacts
+- `--output-dir <dir>`: write roundtrip obfuscated output file into a specific directory (file input only)
 
 Roundtrip always writes a normalized comparison set:
 
@@ -297,7 +314,7 @@ Prints:
 ### `translate`
 
 ```bash
-python obfuscator.py translate --input <input.sql> --source-dialect <dialect> --target-dialect <dialect> [options]
+python obfuscator.py translate --input <input.sql|-> --source-dialect <dialect> --target-dialect <dialect> [options]
 ```
 
 Options:
@@ -307,12 +324,26 @@ Options:
 - `--validate`: parse translated SQL with target dialect and fail on parse errors
 - `--workspace <dir>`: optional path to persist `reports/translation_report.json`
 - `--report-only`: write no translated SQL file; only print summary and optional report artifact
+- `--stdout-only`: print translated SQL to stdout without writing translated SQL output files
+- `--output-dir <dir>`: write translated SQL output file into a specific directory (file input only)
 
 Output:
 
 - Always prints `translate summary: source=... target=... statements=... failed=... warnings=...`
+- Translated SQL is printed to stdout when `--stdout-only` is used
+- For stdin input (`--input -`) with no `--out` and no `--output-dir`, translated SQL is printed to stdout
 - Returns `0` when translation succeeds and optional validation passes
 - Returns `1` on read/parse/translation/validation/report-write failures
+
+## CI-Friendly Usage
+
+- Validate LLM edits without file writes:
+  - `python obfuscator.py deobfuscate --workspace run.obf --input run.obf/llm_response_obfuscated.sql --dry-run`
+- Pipe SQL through translation:
+  - `cat input.sql | python obfuscator.py translate --input - --source-dialect tsql --target-dialect hive`
+- Keep generated SQL artifacts in dedicated folders:
+  - `python obfuscator.py obfuscate input.sql --output-dir artifacts/sql`
+  - `python obfuscator.py translate --input input.sql --source-dialect tsql --target-dialect hive --output-dir artifacts/sql`
 
 ## Usage Examples
 
@@ -587,9 +618,13 @@ Actions:
 2. Narrow down the failing statement using `batch_index`/`statement_index` in the report.
 3. Translate in smaller sections when dealing with unsupported dialect-specific syntax.
 
-## Notes and Limits
+## Current Limits
 
-- `--strict-go` is currently reserved and does not change behavior yet.
+- `--strict-go` currently validates T-SQL `GO` separators only when `GO` starts a line; use standalone `GO` lines in strict mode.
+- `--output-dir` is supported for file inputs only (not stdin).
+- `--stdout-only` cannot be combined with `--output-dir`.
+- For `translate`, `--stdout-only` cannot be combined with `--out` or `--report-only`.
+- For `translate`, `--out` cannot be combined with `--output-dir`.
 - Comments/formatting can change due to SQL regeneration (`sqlglot` output style).
 - The tool targets identifier round-trip behavior, not byte-for-byte source reconstruction.
 - Translation is structural via `sqlglot`, not a semantic equivalence guarantee.

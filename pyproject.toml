@@ -17,6 +17,9 @@ dev = [
   "pytest>=8.0.0",
 ]
 
+[project.scripts]
+sql-obfuscator = "sql_obfuscator.cli:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
