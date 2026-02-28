@@ -165,8 +165,8 @@ script.obf/
 |-- mapping.schema.json
 |-- context.schema.json
 |-- integrity.schema.json
-|-- redaction.json                    # reversible redaction mode only
-|-- redaction.schema.json             # reversible redaction mode only
+|-- redaction.json                     # reversible redaction mode only
+|-- redaction.schema.json              # reversible redaction mode only
 `-- reports/
     |-- deobfuscation_report.json       # after deobfuscate/roundtrip
     |-- coverage_report.txt             # after deobfuscate/roundtrip
@@ -174,7 +174,7 @@ script.obf/
     |-- roundtrip_diff.txt              # after roundtrip --diff-report
     |-- original_pretty.sql             # normalized with sqlglot pretty formatting
     |-- deobfuscated_pretty.sql         # normalized with sqlglot pretty formatting
-    `-- roundtrip_normalized_diff.txt   # diff of the normalized pair above
+    |-- roundtrip_normalized_diff.txt   # diff of the normalized pair above
     |-- translation_report.schema.json  # after translate --workspace ...
     `-- translation_report.json         # after translate --workspace ...
 ```
@@ -284,7 +284,7 @@ Uses obfuscation options from `obfuscate` (`--workspace`, `--seed`, `--pretty`, 
 
 Additional option:
 
-- `--diff-report`: writes unified diff to `reports/roundtrip_diff.txt`
+- `--diff-report`: writes a raw diff artifact to `reports/roundtrip_diff.txt`
 - `--stdout-only`: skip sibling obfuscated output file write while still producing workspace/report artifacts
 - `--output-dir <dir>`: write roundtrip obfuscated output file into a specific directory (file input only)
 
@@ -295,6 +295,7 @@ Roundtrip always writes a normalized comparison set:
 - `reports/roundtrip_normalized_diff.txt`
 
 `roundtrip_report.json` includes both raw and normalized match metrics.
+When the normalized pair matches exactly, `reports/roundtrip_diff.txt` becomes a short summary instead of a large formatting-only diff.
 `roundtrip` returns non-zero if unresolved or low-confidence mappings are detected.
 
 ### `workspace-info`
@@ -618,6 +619,23 @@ Actions:
 2. Narrow down the failing statement using `batch_index`/`statement_index` in the report.
 3. Translate in smaller sections when dealing with unsupported dialect-specific syntax.
 
+### Summarized Parser Warnings
+
+Symptoms:
+
+- CLI prints a notice like `sqlglot used fallback parsing for ... statement(s)`.
+
+Meaning:
+
+- Some statements were handled through the compatibility/fallback path, which is common for procedural T-SQL constructs.
+- This notice does not by itself mean the command failed.
+
+Actions:
+
+1. Check the command exit code first.
+2. For `roundtrip`, inspect `reports/roundtrip_report.json` and the normalized artifacts before treating the warning as a correctness issue.
+3. If behavior is wrong or parsing still fails, isolate the smallest failing statement and test that fragment directly.
+
 ## Current Limits
 
 - `--strict-go` currently validates T-SQL `GO` separators only when `GO` starts a line; use standalone `GO` lines in strict mode.
@@ -627,6 +645,7 @@ Actions:
 - For `translate`, `--out` cannot be combined with `--output-dir`.
 - Comments/formatting can change due to SQL regeneration (`sqlglot` output style).
 - The tool targets identifier round-trip behavior, not byte-for-byte source reconstruction.
+- Some advanced procedural T-SQL constructs are handled through compatibility/fallback parsing, so warning summaries can appear even when normalized roundtrip succeeds.
 - Translation is structural via `sqlglot`, not a semantic equivalence guarantee.
 
 ## Development

@@ -11,13 +11,14 @@ Each section includes:
 Note on examples:
 
 - The SQL output examples below were captured from real CLI runs.
-- The identifier replacements right now (2026-02-21) are animal based.
+- The identifier replacements in the current generator are animal based.
 - If `--seed` is not set, exact animal identifier names can differ between runs.
 - The app uses `sqlglot` to parse, and the SQL output is formatted with the option `pretty=True`, meaning the SQL output in the examples below doesn't keep the format used in the SQL input.
 - You can use `-` as input for `obfuscate`, `roundtrip`, and `translate --input -` to read SQL from stdin.
 - You can use `--stdout-only` to print SQL output without writing sibling/default SQL output files.
 - `--output-dir` is for file inputs, and cannot be combined with `--stdout-only`.
 - For `translate`, `--out` cannot be combined with `--output-dir`, and `--stdout-only` cannot be combined with `--report-only`.
+- Some advanced procedural T-SQL constructs may emit a summarized `sqlglot used fallback parsing ...` notice; treat that as diagnostic output, not an automatic failure.
 
 ## Key Terms (used throughout)
 
@@ -434,6 +435,8 @@ Command options used:
 Expected result:
 
 - Workspace report files include roundtrip comparison outputs.
+- `reports/original_pretty.sql`, `reports/deobfuscated_pretty.sql`, and `reports/roundtrip_normalized_diff.txt` show the normalized semantic comparison set.
+- If raw SQL differs only by formatting/comments and the normalized pair matches, `reports/roundtrip_diff.txt` contains a short summary instead of a noisy unified diff.
 - Non-zero exit if unresolved/ambiguous/low-confidence issues (or redaction placeholder issues) are detected.
 
 Example expected SQL output (`deobfuscated.sql` from roundtrip):
