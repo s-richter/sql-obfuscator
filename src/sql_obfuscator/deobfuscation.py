@@ -406,21 +406,29 @@ def _resolve_and_apply(
     batch_index: int,
     statement_index: int,
     profile: DialectProfile,
+    fallback_kinds: tuple[str, ...] = (),
 ) -> _ReverseEntry | None:
     context = _resolution_context(node, batch_index=batch_index, statement_index=statement_index)
-    resolved = resolver.resolve(
-        obfuscated_lexeme,
-        kind=kind,
-        batch_index=batch_index,
-        statement_index=statement_index,
-        scope_id=str(context["scope_id"]),
-        parent_kind=str(context["parent_kind"]),
-        role=role,
-        statement_kind=str(context["statement_kind"]),
-        clause_kind=str(context["clause_kind"]),
-        node_kind=str(context["node_kind"]),
-        arg_key=str(context["arg_key"]),
-    )
+    kinds_to_try = (kind, *fallback_kinds)
+    resolved: _ResolutionOutcome | None = None
+    resolved_kind = kind
+    for candidate_kind in kinds_to_try:
+        resolved = resolver.resolve(
+            obfuscated_lexeme,
+            kind=candidate_kind,
+            batch_index=batch_index,
+            statement_index=statement_index,
+            scope_id=str(context["scope_id"]),
+            parent_kind=str(context["parent_kind"]),
+            role=role,
+            statement_kind=str(context["statement_kind"]),
+            clause_kind=str(context["clause_kind"]),
+            node_kind=str(context["node_kind"]),
+            arg_key=str(context["arg_key"]),
+        )
+        if resolved is not None:
+            resolved_kind = candidate_kind
+            break
     if resolved is None:
         candidates = resolver.candidates(obfuscated_lexeme)
         if candidates:
@@ -443,15 +451,20 @@ def _resolve_and_apply(
         return None
     _set_identifier(identifier, resolved.entry, profile=profile)
     report["mapped_identifiers"] += 1
-    if resolved.confidence < 80:
+    is_redundant_projection_alias_fallback = kind == "column_alias" and resolved_kind == "column"
+    if resolved.confidence < 80 or (resolved_kind != kind and not is_redundant_projection_alias_fallback):
         _record_low_confidence(
             report,
             value=obfuscated_lexeme,
             kind=kind,
             batch_index=batch_index,
             statement_index=statement_index,
-            confidence=resolved.confidence,
-            pass_name=resolved.pass_name,
+            confidence=min(resolved.confidence, 70) if resolved_kind != kind else resolved.confidence,
+            pass_name=(
+                f"{resolved.pass_name}_fallback_{resolved_kind}"
+                if resolved_kind != kind
+                else resolved.pass_name
+            ),
             candidate_count=resolved.candidate_count,
         )
     return resolved.entry
@@ -580,6 +593,7 @@ def _transform_statement(
                     batch_index=batch_index,
                     statement_index=statement_index,
                     profile=profile,
+                    fallback_kinds=("column",),
                 )
             return node
 

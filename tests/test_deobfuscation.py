@@ -163,3 +163,31 @@ def test_deobfuscate_reports_low_confidence_after_statement_shift():
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
     assert report["low_confidence_count"] > 0
+
+
+def test_deobfuscate_roundtrip_restores_projection_alias_matching_column_name():
+    original_sql = """
+    WITH RankedOrders AS (
+        SELECT
+            r.UserId AS UserId,
+            r.RegionId AS RegionId
+        FROM #RecentOrders r
+    )
+    SELECT
+        ro.UserId,
+        ro.RegionId
+    FROM RankedOrders ro;
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=123, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "AS UserId" in deobfuscated_sql
+    assert "AS RegionId" in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+    assert report["low_confidence_count"] == 0
