@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from sql_obfuscator.cli import (
+    _build_roundtrip_diff_text,
+    _normalize_sql_for_comparison,
+    _summarize_sqlglot_warnings,
+)
 from sql_obfuscator.deobfuscation import deobfuscate_sql_with_report
 from sql_obfuscator.pipeline import obfuscate_sql_with_metadata
 
@@ -191,3 +196,88 @@ def test_deobfuscate_roundtrip_restores_projection_alias_matching_column_name():
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
     assert report["low_confidence_count"] == 0
+
+
+def test_deobfuscate_roundtrip_preserves_tsql_json_access_normalized_shape():
+    original_sql = """
+    SELECT
+        ISNULL(JSON_QUERY(AttributesJson, '$.channel'), JSON_VALUE(AttributesJson, '$.channel')) AS SalesChannel,
+        ISNULL(JSON_QUERY(AttributesJson, '$.warehouse'), JSON_VALUE(AttributesJson, '$.warehouse')) AS WarehouseCode,
+        TRY_CAST(ISNULL(JSON_QUERY(AttributesJson, '$.priorityScore'), JSON_VALUE(AttributesJson, '$.priorityScore')) AS INT) AS PriorityScore
+    FROM #StageOrders;
+    """
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=55, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
+    assert _normalize_sql_for_comparison(original_sql, dialect="tsql") == _normalize_sql_for_comparison(
+        deobfuscated_sql,
+        dialect="tsql",
+    )
+
+
+def test_deobfuscate_tsql_set_options_do_not_report_unknown_identifiers():
+    original_sql = """
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    SET DEADLOCK_PRIORITY HIGH;
+    """.strip()
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=66, pretty=True)
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        obfuscated.output_sql,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=True,
+    )
+
+    assert "SET NOCOUNT ON;" in deobfuscated_sql
+    assert "SET XACT_ABORT ON;" in deobfuscated_sql
+    assert "SET DEADLOCK_PRIORITY HIGH" in deobfuscated_sql
+    assert report["unknown_count"] == 0
+    assert report["unknown_by_kind"] == {}
+
+
+def test_normalized_comparison_ignores_comment_loss():
+    original_sql = "-- heading comment\nSELECT 1;"
+    deobfuscated_sql = "SELECT 1;"
+
+    assert _normalize_sql_for_comparison(original_sql, dialect="tsql") == _normalize_sql_for_comparison(
+        deobfuscated_sql,
+        dialect="tsql",
+    )
+
+
+def test_roundtrip_diff_text_suppresses_raw_diff_when_normalized_pair_matches():
+    original_sql = "-- heading comment\nSELECT 1;"
+    deobfuscated_sql = "SELECT 1;"
+    diff_text = _build_roundtrip_diff_text(
+        original_sql=original_sql,
+        deobfuscated_sql=deobfuscated_sql,
+        original_pretty_sql=_normalize_sql_for_comparison(original_sql, dialect="tsql"),
+        deobfuscated_pretty_sql=_normalize_sql_for_comparison(deobfuscated_sql, dialect="tsql"),
+    )
+
+    assert "No semantic diff detected after normalized comparison." in diff_text
+    assert "original.sql" not in diff_text
+
+
+def test_sqlglot_warning_summary_deduplicates_and_limits_examples():
+    summary = _summarize_sqlglot_warnings(
+        [
+            "'BEGIN TRY' contains unsupported syntax. Falling back to parsing as a 'Command'.",
+            "'BEGIN TRY' contains unsupported syntax. Falling back to parsing as a 'Command'.",
+            "'EXEC sys.sp_executesql' contains unsupported syntax. Falling back to parsing as a 'Command'.",
+            "'END CATCH' contains unsupported syntax. Falling back to parsing as a 'Command'.",
+        ]
+    )
+
+    assert summary is not None
+    assert "4 statement(s)" in summary
+    assert "3 unique pattern(s)" in summary
+    assert summary.count("Falling back to parsing as a 'Command'.") == 3

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import logging
 import sys
 from dataclasses import asdict
+from contextlib import contextmanager
 from pathlib import Path
 
-from sqlglot import parse
 from sqlglot.errors import ParseError
 
 from .dialects_factory import get_dialect_profile, supported_dialects
@@ -14,6 +15,7 @@ from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
+from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .translation import translate_sql_with_report
 from .workspace import (
     default_workspace_path,
@@ -26,6 +28,58 @@ from .workspace import (
     save_workspace_artifacts,
     validate_workspace_integrity,
 )
+
+
+class _SqlglotWarningCapture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@contextmanager
+def _capture_sqlglot_warnings() -> list[str]:
+    logger = logging.getLogger("sqlglot")
+    handler = _SqlglotWarningCapture()
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    logger.handlers = [handler]
+    logger.setLevel(logging.WARNING)
+    logger.propagate = False
+    try:
+        yield handler.messages
+    finally:
+        logger.handlers = previous_handlers
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+
+def _summarize_sqlglot_warnings(messages: list[str]) -> str | None:
+    if not messages:
+        return None
+    unique_messages: list[str] = []
+    for message in messages:
+        if message not in unique_messages:
+            unique_messages.append(message)
+    example_count = min(3, len(unique_messages))
+    examples = "; ".join(_single_line_warning(message) for message in unique_messages[:example_count])
+    summary = (
+        f"Notice: sqlglot used fallback parsing for {len(messages)} statement(s) "
+        f"({len(unique_messages)} unique pattern(s))."
+    )
+    if examples:
+        summary += f" Examples: {examples}"
+    return summary
+
+
+def _single_line_warning(message: str, max_length: int = 140) -> str:
+    flattened = " ".join(part for part in message.split())
+    if len(flattened) <= max_length:
+        return flattened
+    return flattened[: max_length - 3] + "..."
 
 
 def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
@@ -348,9 +402,39 @@ def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
         if not batch.strip():
             normalized_batches.append(batch)
             continue
-        statements = parse(batch, dialect=dialect)
-        normalized_batches.append(";\n".join(stmt.sql(dialect=dialect, pretty=True) for stmt in statements))
+        statements = parse_sql(batch, dialect=dialect)
+        normalized_batches.append(
+            join_emitted_statements(
+                [emit_sql(stmt, dialect=dialect, pretty=True, strip_comments=True) for stmt in statements]
+            )
+        )
     return profile.join_batches(normalized_batches)
+
+
+def _build_roundtrip_diff_text(
+    *,
+    original_sql: str,
+    deobfuscated_sql: str,
+    original_pretty_sql: str,
+    deobfuscated_pretty_sql: str,
+) -> str:
+    raw_diff = "".join(
+        difflib.unified_diff(
+            original_sql.splitlines(keepends=True),
+            deobfuscated_sql.splitlines(keepends=True),
+            fromfile="original.sql",
+            tofile="deobfuscated.sql",
+        )
+    )
+    if original_sql == deobfuscated_sql:
+        return raw_diff
+    if original_pretty_sql == deobfuscated_pretty_sql:
+        return (
+            "No semantic diff detected after normalized comparison.\n"
+            "Raw SQL differs only by non-semantic formatting/comment changes.\n"
+            "See reports/original_pretty.sql and reports/deobfuscated_pretty.sql for the normalized pair.\n"
+        )
+    return raw_diff
 
 
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
@@ -602,15 +686,6 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         report_payload=deobfuscation_report,
     )
 
-    diff_lines = list(
-        difflib.unified_diff(
-            original_sql.splitlines(keepends=True),
-            deobfuscated_sql.splitlines(keepends=True),
-            fromfile="original.sql",
-            tofile="deobfuscated.sql",
-        )
-    )
-
     dialect = context_payload.get("dialect", "tsql")
     try:
         original_pretty_sql = _normalize_sql_for_comparison(original_sql, dialect=dialect)
@@ -626,13 +701,19 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
             tofile="reports/deobfuscated_pretty.sql",
         )
     )
+    diff_text = _build_roundtrip_diff_text(
+        original_sql=original_sql,
+        deobfuscated_sql=deobfuscated_sql,
+        original_pretty_sql=original_pretty_sql,
+        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
+    )
 
     roundtrip_report = {
         "schema_version": 1,
         "exact_match": original_sql == deobfuscated_sql,
         "original_char_count": len(original_sql),
         "deobfuscated_char_count": len(deobfuscated_sql),
-        "diff_line_count": len(diff_lines),
+        "diff_line_count": len(diff_text.splitlines()),
         "normalized_exact_match": original_pretty_sql == deobfuscated_pretty_sql,
         "normalized_original_char_count": len(original_pretty_sql),
         "normalized_deobfuscated_char_count": len(deobfuscated_pretty_sql),
@@ -642,7 +723,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     save_roundtrip_reports(
         workspace_path=workspace_path,
         report_payload=roundtrip_report,
-        diff_text="".join(diff_lines) if args.diff_report else None,
+        diff_text=diff_text if args.diff_report else None,
         original_pretty_sql=original_pretty_sql,
         deobfuscated_pretty_sql=deobfuscated_pretty_sql,
         normalized_diff_text="".join(normalized_diff_lines),
@@ -789,20 +870,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_command_parser()
     args = parser.parse_args(argv)
 
-    try:
-        if args.command == "obfuscate":
-            return _run_obfuscate_command(args)
-        if args.command == "deobfuscate":
-            return _run_deobfuscate_command(args)
-        if args.command == "roundtrip":
-            return _run_roundtrip_command(args)
-        if args.command == "validate-before-write":
-            return _run_validate_before_write_command(args)
-        if args.command == "workspace-info":
-            return _run_workspace_info_command(args)
-        if args.command == "translate":
-            return _run_translate_command(args)
-        raise WorkspaceError(f"Unknown command: {args.command}")
-    except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+    with _capture_sqlglot_warnings() as sqlglot_warnings:
+        try:
+            if args.command == "obfuscate":
+                rc = _run_obfuscate_command(args)
+            elif args.command == "deobfuscate":
+                rc = _run_deobfuscate_command(args)
+            elif args.command == "roundtrip":
+                rc = _run_roundtrip_command(args)
+            elif args.command == "validate-before-write":
+                rc = _run_validate_before_write_command(args)
+            elif args.command == "workspace-info":
+                rc = _run_workspace_info_command(args)
+            elif args.command == "translate":
+                rc = _run_translate_command(args)
+            else:
+                raise WorkspaceError(f"Unknown command: {args.command}")
+        except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
+            summary = _summarize_sqlglot_warnings(sqlglot_warnings)
+            if summary:
+                print(summary, file=sys.stderr)
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    summary = _summarize_sqlglot_warnings(sqlglot_warnings)
+    if summary:
+        print(summary, file=sys.stderr)
+    return rc

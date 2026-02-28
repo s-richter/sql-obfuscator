@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlglot import parse
 from sqlglot.errors import ParseError
 
 from .dialects_base import DialectProfile
@@ -11,6 +10,7 @@ from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError
 from .redaction import apply_redaction
 from .registry import IdentifierRegistry
+from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .transformer import transform_statements
 
 _GO_STANDALONE_RE = re.compile(r"^\s*GO\s*$", re.IGNORECASE)
@@ -58,7 +58,7 @@ def _process_batch(
         return batch_sql
 
     try:
-        statements = parse(batch_sql, dialect=dialect)
+        statements = parse_sql(batch_sql, dialect=dialect)
     except ParseError as exc:
         error_msg = _format_parse_error(
             exc, batch_sql, batch_number, total_batches)
@@ -72,8 +72,8 @@ def _process_batch(
         dialect=dialect,
         profile=profile,
     )
-    return ";\n".join(
-        stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed
+    return join_emitted_statements(
+        [emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in transformed]
     )
 
 
@@ -168,7 +168,7 @@ def obfuscate_sql_with_metadata(
         )
         transformed_batches.append(transformed_batch)
         if batch.strip():
-            total_statements += len(parse(batch, dialect=dialect))
+            total_statements += len(parse_sql(batch, dialect=dialect))
 
     output_sql = profile.join_batches(transformed_batches)
     mapping_payload = registry.mapping_payload()

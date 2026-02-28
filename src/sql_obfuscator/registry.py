@@ -11,6 +11,9 @@ from .names import AnimalNameProvider
 class IdentifierKey:
     value: str
     temp_prefix: str = ""
+    namespace: str = ""
+    spelling: str = ""
+    quoted: bool = False
 
 
 @dataclass
@@ -26,6 +29,9 @@ class MappingOccurrence:
     node_kind: str = ""
     arg_key: str = ""
     type_lexeme: str | None = None
+    original_lexeme: str | None = None
+    original_unquoted: str | None = None
+    original_was_quoted: bool | None = None
 
 
 @dataclass
@@ -42,6 +48,23 @@ def normalize_identifier(raw: str) -> IdentifierKey:
     profile = get_dialect_profile("tsql")
     normalized = profile.normalize_identifier(raw)
     return IdentifierKey(value=normalized.value, temp_prefix=normalized.temp_prefix)
+
+
+def _mapping_namespace(kind: str) -> str:
+    if kind in {"alias", "cte", "column_alias"}:
+        return kind
+    return ""
+
+
+def _mapping_spelling(
+    *,
+    namespace: str,
+    original_unquoted: str,
+    original_was_quoted: bool,
+) -> tuple[str, bool]:
+    if namespace:
+        return original_unquoted, original_was_quoted
+    return "", False
 
 
 class IdentifierRegistry:
@@ -78,7 +101,19 @@ class IdentifierRegistry:
         type_lexeme: str | None = None,
     ) -> str:
         normalized = self._profile.normalize_identifier(raw_identifier)
-        key = IdentifierKey(value=normalized.value, temp_prefix=normalized.temp_prefix)
+        namespace = _mapping_namespace(kind)
+        spelling, quoted = _mapping_spelling(
+            namespace=namespace,
+            original_unquoted=normalized.original_unquoted,
+            original_was_quoted=normalized.original_was_quoted,
+        )
+        key = IdentifierKey(
+            value=normalized.value,
+            temp_prefix=normalized.temp_prefix,
+            namespace=namespace,
+            spelling=spelling,
+            quoted=quoted,
+        )
         if key not in self._map:
             self._map[key] = self._name_provider.next_name()
             self._entries[key] = MappingEntry(
@@ -103,6 +138,9 @@ class IdentifierRegistry:
                 node_kind=node_kind,
                 arg_key=arg_key,
                 type_lexeme=type_lexeme,
+                original_lexeme=raw_identifier.strip(),
+                original_unquoted=normalized.original_unquoted,
+                original_was_quoted=normalized.original_was_quoted,
             )
         )
         return f"{key.temp_prefix}{self._map[key]}"
@@ -112,19 +150,36 @@ class IdentifierRegistry:
         forward_index: dict[str, str] = {}
         reverse_index: dict[str, dict[str, str]] = {}
         for key, entry in sorted(
-            self._entries.items(), key=lambda item: (item[0].value, item[0].temp_prefix)
+            self._entries.items(),
+            key=lambda item: (
+                item[0].value,
+                item[0].temp_prefix,
+                item[0].namespace,
+                item[0].spelling,
+                item[0].quoted,
+            ),
         ):
             obfuscated_lexeme = f"{key.temp_prefix}{entry.obfuscated_unbracketed}"
-            forward_key = f"{key.temp_prefix}{key.value}"
+            forward_key = (
+                f"{key.namespace}:{key.temp_prefix}{key.value}:{int(key.quoted)}:{key.spelling}"
+                if key.namespace
+                else f"{key.temp_prefix}{key.value}"
+            )
             forward_index[forward_key] = obfuscated_lexeme
             reverse_index[obfuscated_lexeme] = {
                 "normalized_original": key.value,
                 "temp_prefix": key.temp_prefix,
+                **({"namespace": key.namespace} if key.namespace else {}),
+                **({"spelling": key.spelling} if key.spelling else {}),
+                **({"quoted": key.quoted} if key.namespace else {}),
             }
             entries.append(
                 {
                     "normalized_original": key.value,
                     "temp_prefix": key.temp_prefix,
+                    **({"namespace": key.namespace} if key.namespace else {}),
+                    **({"spelling": key.spelling} if key.spelling else {}),
+                    **({"quoted": key.quoted} if key.namespace else {}),
                     "original_lexeme": entry.original_lexeme,
                     "original_unbracketed": entry.original_unbracketed,
                     "original_was_bracketed": entry.original_was_bracketed,
@@ -161,6 +216,21 @@ class IdentifierRegistry:
                             **(
                                 {"type_lexeme": occ.type_lexeme}
                                 if occ.type_lexeme is not None
+                                else {}
+                            ),
+                            **(
+                                {"original_lexeme": occ.original_lexeme}
+                                if occ.original_lexeme is not None
+                                else {}
+                            ),
+                            **(
+                                {"original_unquoted": occ.original_unquoted}
+                                if occ.original_unquoted is not None
+                                else {}
+                            ),
+                            **(
+                                {"original_was_quoted": occ.original_was_quoted}
+                                if occ.original_was_quoted is not None
                                 else {}
                             ),
                         }

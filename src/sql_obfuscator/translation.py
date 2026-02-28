@@ -9,6 +9,7 @@ from sqlglot.errors import ParseError
 
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError
+from .sqlglot_compat import parse_sql
 
 
 @dataclass
@@ -108,7 +109,7 @@ def translate_sql_with_report(
             continue
 
         try:
-            statements = parse(batch_sql, dialect=source_sqlglot)
+            statements = parse_sql(batch_sql, dialect=source_sqlglot, parse_func=parse)
         except ParseError as exc:
             failures.append(
                 {
@@ -159,7 +160,7 @@ def translate_sql_with_report(
             if not translated_batch.strip():
                 continue
             try:
-                parse(translated_batch, dialect=target_sqlglot)
+                parse_sql(translated_batch, dialect=target_sqlglot, parse_func=parse)
             except ParseError as exc:
                 validated = False
                 failures.append(

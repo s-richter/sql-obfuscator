@@ -4,12 +4,13 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sqlglot import exp, parse
+from sqlglot import exp
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
 
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
+from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 
 ALLOWED_REDACTION_MODES = {"none", "irreversible", "reversible"}
 ALLOWED_REDACTION_POLICIES = {"all", "strings-only", "sensitive"}
@@ -61,7 +62,7 @@ def apply_redaction(
             output_batches.append(batch_sql)
             continue
         try:
-            statements = parse(batch_sql, dialect=dialect)
+            statements = parse_sql(batch_sql, dialect=dialect)
         except ParseError as exc:
             raise ParseScriptError(
                 f"Parse error during redaction in batch {batch_index}/{len(batches)}: {exc}"
@@ -79,7 +80,9 @@ def apply_redaction(
             )
             for stmt in statements
         ]
-        output_batches.append(";\n".join(stmt.sql(dialect=dialect, pretty=pretty) for stmt in redacted))
+        output_batches.append(
+            join_emitted_statements([emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in redacted])
+        )
 
     redaction_payload: dict[str, Any] | None = None
     if redaction_mode == "reversible" and literal_entries:
@@ -215,7 +218,7 @@ def restore_reversible_redaction(
             output_batches.append(batch_sql)
             continue
         try:
-            statements = parse(batch_sql, dialect=dialect)
+            statements = parse_sql(batch_sql, dialect=dialect)
         except ParseError as exc:
             raise ParseScriptError(
                 f"Parse error during reversible redaction restoration in batch {batch_index}/{len(batches)}: {exc}"
@@ -230,7 +233,9 @@ def restore_reversible_redaction(
             for stmt in statements
         ]
         output_batches.append(
-            ";\n".join(stmt.sql(dialect=dialect, pretty=pretty) for stmt in restored_statements)
+            join_emitted_statements(
+                [emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in restored_statements]
+            )
         )
 
     missing_placeholders = sorted(expected_placeholders - restored_placeholders)

@@ -15,6 +15,14 @@ def _identifier_name(identifier: exp.Identifier | None) -> str | None:
     return identifier.name
 
 
+def _identifier_raw(identifier: exp.Identifier | None) -> str | None:
+    if not isinstance(identifier, exp.Identifier):
+        return None
+    if identifier.args.get("quoted"):
+        return f"[{identifier.name}]"
+    return identifier.name
+
+
 def _node_context(
     node: Expression, *, batch_index: int, statement_index: int
 ) -> dict[str, str | int]:
@@ -95,6 +103,16 @@ def _is_update_alias_target(table: exp.Table) -> bool:
     return table_name in alias_names
 
 
+def _is_set_option_column(column: exp.Column) -> bool:
+    parent = column.parent
+    if not isinstance(parent, exp.EQ):
+        return False
+    set_item = parent.parent
+    if not isinstance(set_item, exp.SetItem):
+        return False
+    return isinstance(set_item.parent, exp.Set)
+
+
 def _rename_table(
     table: exp.Table,
     registry: IdentifierRegistry,
@@ -113,7 +131,7 @@ def _rename_table(
         identifier.set(
             "this",
             registry.get_or_create(
-                identifier.name,
+                _identifier_raw(identifier) or identifier.name,
                 kind="alias",
                 role="update_target_alias",
                 **context,
@@ -139,12 +157,14 @@ def _rename_column(
     statement_index: int,
 ) -> exp.Column:
     context = _node_context(column, batch_index=batch_index, statement_index=statement_index)
+    if _is_set_option_column(column):
+        return column
     identifier = column.this
     if isinstance(identifier, exp.Identifier):
         identifier.set(
             "this",
             registry.get_or_create(
-                identifier.name,
+                _identifier_raw(identifier) or identifier.name,
                 kind="column",
                 role="column_reference",
                 **context,
@@ -156,7 +176,7 @@ def _rename_column(
         table_identifier.set(
             "this",
             registry.get_or_create(
-                table_identifier.name,
+                _identifier_raw(table_identifier) or table_identifier.name,
                 kind="alias",
                 role="column_qualifier",
                 **context,
@@ -180,7 +200,7 @@ def _rename_cte(
     alias.this.set(
         "this",
         registry.get_or_create(
-            alias.this.name,
+            _identifier_raw(alias.this) or alias.this.name,
             kind="cte",
             role="cte_alias",
             **context,
@@ -206,7 +226,7 @@ def _rename_table_alias(
         alias_identifier.set(
             "this",
             registry.get_or_create(
-                alias_identifier.name,
+                _identifier_raw(alias_identifier) or alias_identifier.name,
                 kind="alias",
                 role="table_alias",
                 **context,
@@ -218,7 +238,7 @@ def _rename_table_alias(
             identifier.set(
                 "this",
                 registry.get_or_create(
-                    identifier.name,
+                    _identifier_raw(identifier) or identifier.name,
                     kind="column_alias",
                     role="table_alias_column",
                     **context,
@@ -241,7 +261,7 @@ def _rename_expression_alias(
         alias_identifier.set(
             "this",
             registry.get_or_create(
-                alias_identifier.name,
+                _identifier_raw(alias_identifier) or alias_identifier.name,
                 kind="column_alias",
                 role="projection_alias",
                 **context,
@@ -313,6 +333,10 @@ def transform_statements(
     type_lexemes_by_start = _column_type_lexemes_by_start(batch_sql, dialect=dialect)
 
     for statement_index, statement in enumerate(statements, start=1):
+        if isinstance(statement.meta.get("raw_sql"), str):
+            transformed.append(statement)
+            continue
+
         def _transform(node: Expression) -> Expression:
             if isinstance(node, exp.Table):
                 return _rename_table(

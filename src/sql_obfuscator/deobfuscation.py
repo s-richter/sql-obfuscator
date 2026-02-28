@@ -3,19 +3,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlglot import exp, parse
+from sqlglot import exp
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
 
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
+from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 
 
 @dataclass
 class _ReverseEntry:
     normalized_original: str
     temp_prefix: str
+    namespace: str
     original_unbracketed: str
     original_was_bracketed: bool
     kinds: set[str]
@@ -43,6 +45,7 @@ class _ReverseResolver:
             reverse_entry = _ReverseEntry(
                 normalized_original=entry["normalized_original"],
                 temp_prefix=entry["temp_prefix"],
+                namespace=str(entry.get("namespace", "")),
                 original_unbracketed=entry["original_unbracketed"],
                 original_was_bracketed=entry["original_was_bracketed"],
                 kinds=kinds,
@@ -250,17 +253,34 @@ def _is_update_alias_target(table: exp.Table) -> bool:
     return table_name.name in alias_names
 
 
+def _is_set_option_column(column: exp.Column) -> bool:
+    parent = column.parent
+    if not isinstance(parent, exp.EQ):
+        return False
+    set_item = parent.parent
+    if not isinstance(set_item, exp.SetItem):
+        return False
+    return isinstance(set_item.parent, exp.Set)
+
+
 def _set_identifier(
     identifier: exp.Identifier,
     original: _ReverseEntry,
     *,
     profile: DialectProfile,
+    original_unquoted: str | None = None,
+    original_was_quoted: bool | None = None,
 ) -> None:
-    original_unquoted = _strip_temp_prefix(original.original_unbracketed, original.temp_prefix)
+    effective_unquoted = original_unquoted
+    if effective_unquoted is None:
+        effective_unquoted = _strip_temp_prefix(original.original_unbracketed, original.temp_prefix)
+    effective_was_quoted = (
+        original.original_was_bracketed if original_was_quoted is None else original_was_quoted
+    )
     profile.apply_original_quoting(
         identifier,
-        original_unquoted=original_unquoted,
-        original_was_quoted=original.original_was_bracketed,
+        original_unquoted=effective_unquoted,
+        original_was_quoted=effective_was_quoted,
     )
 
 
@@ -449,7 +469,31 @@ def _resolve_and_apply(
                 statement_index=statement_index,
             )
         return None
-    _set_identifier(identifier, resolved.entry, profile=profile)
+    occurrence_spelling = _resolve_occurrence_spelling(
+        resolved.entry,
+        kind=kind,
+        current_was_quoted=bool(identifier.args.get("quoted")),
+        batch_index=batch_index,
+        statement_index=statement_index,
+        scope_id=str(context["scope_id"]),
+        parent_kind=str(context["parent_kind"]),
+        role=role,
+        statement_kind=str(context["statement_kind"]),
+        clause_kind=str(context["clause_kind"]),
+        node_kind=str(context["node_kind"]),
+        arg_key=str(context["arg_key"]),
+    )
+    _set_identifier(
+        identifier,
+        resolved.entry,
+        profile=profile,
+        original_unquoted=(
+            occurrence_spelling["original_unquoted"] if occurrence_spelling is not None else None
+        ),
+        original_was_quoted=(
+            occurrence_spelling["original_was_quoted"] if occurrence_spelling is not None else None
+        ),
+    )
     report["mapped_identifiers"] += 1
     is_redundant_projection_alias_fallback = kind == "column_alias" and resolved_kind == "column"
     if resolved.confidence < 80 or (resolved_kind != kind and not is_redundant_projection_alias_fallback):
@@ -470,6 +514,60 @@ def _resolve_and_apply(
     return resolved.entry
 
 
+def _resolve_occurrence_spelling(
+    entry: _ReverseEntry,
+    *,
+    kind: str,
+    current_was_quoted: bool,
+    batch_index: int,
+    statement_index: int,
+    scope_id: str,
+    parent_kind: str,
+    role: str,
+    statement_kind: str,
+    clause_kind: str,
+    node_kind: str,
+    arg_key: str,
+) -> dict[str, Any] | None:
+    candidate_occurrences = [
+        occ
+        for occ in entry.occurrences
+        if isinstance(occ, dict)
+        and occ.get("kind") == kind
+        and isinstance(occ.get("original_unquoted"), str)
+        and isinstance(occ.get("original_was_quoted"), bool)
+        and occ.get("original_was_quoted") == current_was_quoted
+    ]
+    if not candidate_occurrences:
+        return None
+
+    scored: list[tuple[dict[str, Any], int]] = []
+    for occ in candidate_occurrences:
+        score = 0
+        if occ.get("batch_index") == batch_index and occ.get("statement_index") == statement_index:
+            score += 45
+        if scope_id and occ.get("scope_id") == scope_id:
+            score += 20
+        if parent_kind and occ.get("parent_kind") == parent_kind:
+            score += 12
+        if role and occ.get("role") == role:
+            score += 10
+        if clause_kind and occ.get("clause_kind") == clause_kind:
+            score += 8
+        if statement_kind and occ.get("statement_kind") == statement_kind:
+            score += 6
+        if node_kind and occ.get("node_kind") == node_kind:
+            score += 4
+        if arg_key and occ.get("arg_key") == arg_key:
+            score += 3
+        scored.append((occ, score))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[0][0]
+
+
 def _transform_statement(
     statement: Expression,
     *,
@@ -479,6 +577,9 @@ def _transform_statement(
     statement_index: int,
     profile: DialectProfile,
 ) -> Expression:
+    if isinstance(statement.meta.get("raw_sql"), str):
+        return statement
+
     def _transform(node: Expression) -> Expression:
         if isinstance(node, exp.Table):
             identifier = node.this
@@ -500,6 +601,8 @@ def _transform_statement(
             return node
 
         if isinstance(node, exp.Column):
+            if _is_set_option_column(node):
+                return node
             column_id = node.this
             if isinstance(column_id, exp.Identifier):
                 _resolve_and_apply(
@@ -722,7 +825,7 @@ def deobfuscate_sql_with_report(
             output_batches.append(batch_sql)
             continue
         try:
-            statements = parse(batch_sql, dialect=dialect)
+            statements = parse_sql(batch_sql, dialect=dialect)
         except ParseError as exc:
             raise ParseScriptError(
                 f"Parse error during de-obfuscation in batch {batch_index}/{len(batches)}: {exc}"
@@ -741,7 +844,7 @@ def deobfuscate_sql_with_report(
                 )
             )
         output_batches.append(
-            ";\n".join(stmt.sql(dialect=dialect, pretty=pretty) for stmt in transformed)
+            join_emitted_statements([emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in transformed])
         )
 
     output_sql = profile.join_batches(output_batches)
