@@ -51,6 +51,27 @@ def test_hive_roundtrip_obfuscate_then_deobfuscate():
     assert "orders" in restored_sql
 
 
+def test_hive_quoted_identifier_mapping_uses_backtick_normalization():
+    sql = "SELECT `case_id`, `alert_family` FROM `risk_cases`"
+    obfuscation = obfuscate_sql_with_metadata(sql, dialect="hive", seed=31, pretty=True)
+
+    case_entry = next(
+        entry
+        for entry in obfuscation.mapping_payload["entries"]
+        if entry["normalized_original"] == "case_id"
+    )
+    alert_entry = next(
+        entry
+        for entry in obfuscation.mapping_payload["entries"]
+        if entry["normalized_original"] == "alert_family"
+    )
+
+    assert case_entry["original_unbracketed"] == "case_id"
+    assert alert_entry["original_unbracketed"] == "alert_family"
+    assert case_entry["original_lexeme"] == "`case_id`"
+    assert alert_entry["original_lexeme"] == "`alert_family`"
+
+
 def test_tsql_merge_output_into_with_schema_qualified_target_roundtrips():
     sql = """
 MERGE dbo.CustomerOrderSummary AS target

@@ -15,11 +15,11 @@ def _identifier_name(identifier: exp.Identifier | None) -> str | None:
     return identifier.name
 
 
-def _identifier_raw(identifier: exp.Identifier | None) -> str | None:
+def _identifier_raw(identifier: exp.Identifier | None, *, profile: DialectProfile) -> str | None:
     if not isinstance(identifier, exp.Identifier):
         return None
     if identifier.args.get("quoted"):
-        return f"[{identifier.name}]"
+        return identifier.sql(dialect=profile.sqlglot_dialect)
     return identifier.name
 
 
@@ -126,16 +126,16 @@ def _rename_table(
     if not isinstance(identifier, exp.Identifier):
         return table
 
-    if _is_update_alias_target(table):
-        # UPDATE alias target should follow alias obfuscation, not table-name obfuscation.
-        identifier.set(
-            "this",
-            registry.get_or_create(
-                _identifier_raw(identifier) or identifier.name,
-                kind="alias",
-                role="update_target_alias",
-                **context,
-            ),
+        if _is_update_alias_target(table):
+            # UPDATE alias target should follow alias obfuscation, not table-name obfuscation.
+            identifier.set(
+                "this",
+                registry.get_or_create(
+                    _identifier_raw(identifier, profile=profile) or identifier.name,
+                    kind="alias",
+                    role="update_target_alias",
+                    **context,
+                ),
         )
         return table
 
@@ -152,6 +152,7 @@ def _rename_table(
 def _rename_column(
     column: exp.Column,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -164,7 +165,7 @@ def _rename_column(
         identifier.set(
             "this",
             registry.get_or_create(
-                _identifier_raw(identifier) or identifier.name,
+                _identifier_raw(identifier, profile=profile) or identifier.name,
                 kind="column",
                 role="column_reference",
                 **context,
@@ -176,7 +177,7 @@ def _rename_column(
         table_identifier.set(
             "this",
             registry.get_or_create(
-                _identifier_raw(table_identifier) or table_identifier.name,
+                _identifier_raw(table_identifier, profile=profile) or table_identifier.name,
                 kind="alias",
                 role="column_qualifier",
                 **context,
@@ -189,6 +190,7 @@ def _rename_column(
 def _rename_cte(
     cte: exp.CTE,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -200,7 +202,7 @@ def _rename_cte(
     alias.this.set(
         "this",
         registry.get_or_create(
-            _identifier_raw(alias.this) or alias.this.name,
+            _identifier_raw(alias.this, profile=profile) or alias.this.name,
             kind="cte",
             role="cte_alias",
             **context,
@@ -212,6 +214,7 @@ def _rename_cte(
 def _rename_table_alias(
     table_alias: exp.TableAlias,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -226,7 +229,7 @@ def _rename_table_alias(
         alias_identifier.set(
             "this",
             registry.get_or_create(
-                _identifier_raw(alias_identifier) or alias_identifier.name,
+                _identifier_raw(alias_identifier, profile=profile) or alias_identifier.name,
                 kind="alias",
                 role="table_alias",
                 **context,
@@ -238,7 +241,7 @@ def _rename_table_alias(
             identifier.set(
                 "this",
                 registry.get_or_create(
-                    _identifier_raw(identifier) or identifier.name,
+                    _identifier_raw(identifier, profile=profile) or identifier.name,
                     kind="column_alias",
                     role="table_alias_column",
                     **context,
@@ -251,6 +254,7 @@ def _rename_table_alias(
 def _rename_expression_alias(
     alias: exp.Alias,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -261,7 +265,7 @@ def _rename_expression_alias(
         alias_identifier.set(
             "this",
             registry.get_or_create(
-                _identifier_raw(alias_identifier) or alias_identifier.name,
+                _identifier_raw(alias_identifier, profile=profile) or alias_identifier.name,
                 kind="column_alias",
                 role="projection_alias",
                 **context,
@@ -273,6 +277,7 @@ def _rename_expression_alias(
 def _rename_column_def(
     column_def: exp.ColumnDef,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -286,7 +291,7 @@ def _rename_column_def(
     identifier.set(
         "this",
         registry.get_or_create(
-            identifier.name,
+            _identifier_raw(identifier, profile=profile) or identifier.name,
             kind="column_def",
             role="column_definition",
             type_lexeme=type_lexeme,
@@ -299,6 +304,7 @@ def _rename_column_def(
 def _rename_insert_column_list(
     schema: exp.Schema,
     registry: IdentifierRegistry,
+    profile: DialectProfile,
     *,
     batch_index: int,
     statement_index: int,
@@ -311,7 +317,7 @@ def _rename_insert_column_list(
             identifier.set(
                 "this",
                 registry.get_or_create(
-                    identifier.name,
+                    _identifier_raw(identifier, profile=profile) or identifier.name,
                     kind="insert_column",
                     role="insert_target_column",
                     **context,
@@ -350,6 +356,7 @@ def transform_statements(
                 return _rename_column(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
@@ -357,6 +364,7 @@ def transform_statements(
                 return _rename_cte(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
@@ -364,6 +372,7 @@ def transform_statements(
                 return _rename_table_alias(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
@@ -371,6 +380,7 @@ def transform_statements(
                 return _rename_expression_alias(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
@@ -378,6 +388,7 @@ def transform_statements(
                 return _rename_column_def(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                     type_lexemes_by_start=type_lexemes_by_start,
@@ -386,6 +397,7 @@ def transform_statements(
                 return _rename_insert_column_list(
                     node,
                     registry,
+                    profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
