@@ -30,6 +30,7 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 .pytest_cache/
+.run_tmp/
 .tmp_pytest
 .tmp_test
 .coverage
