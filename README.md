@@ -7,6 +7,7 @@ Start here for a scenario-based walkthrough of commands, flags, and expected out
 - [Command Tutorial](docs/COMMAND_TUTORIAL.md)
 
 **NOTE**: the code and the documentation in this repository was largely written by **GPT-5.3-Codex Medium**.
+**NOTE**: Due to limitations in the library used for parsing especially T-SQL scripts (_sqlglot_), certain advanced scripts might not be parsed correctly. If this is the case, using an LLM to fix edge cases is the simplest option.
 
 ## What It Does
 
