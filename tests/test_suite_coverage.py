@@ -143,30 +143,37 @@ class TestNegativeTests:
     """Negative tests for error conditions."""
 
     def test_animal_pool_exhaustion_behavior(self):
-        """When animal pool exhausted, should fall back to suffixed names."""
-        from sql_obfuscator.names import AnimalNameProvider, ANIMALS
+        """When base pool is exhausted, should fall back to suffixed names."""
+        from sql_obfuscator.names import ADJECTIVES, ANIMALS, CompositeNameProvider
 
-        provider = AnimalNameProvider()
+        provider = CompositeNameProvider()
         generated = set()
+        base_pool_size = len(ADJECTIVES) * len(ANIMALS)
 
-        # Generate more names than available animals
-        for _ in range(len(ANIMALS) * 2):
+        # Generate more names than available adjective-animal combinations
+        for _ in range(base_pool_size + 25):
             name = provider.next_name()
             generated.add(name)
 
         # Should have generated many names
-        assert len(generated) > len(ANIMALS)
+        assert len(generated) > base_pool_size
         # All should be unique
-        assert len(generated) == len(ANIMALS) * 2
+        assert len(generated) == base_pool_size + 25
 
     def test_reserved_keyword_fallback_generation(self):
         """Verify generated suffixed names don't accidentally be keywords."""
-        from sql_obfuscator.names import AnimalNameProvider, _is_safe_identifier, ANIMALS
+        from sql_obfuscator.names import (
+            ADJECTIVES,
+            ANIMALS,
+            CompositeNameProvider,
+            _is_safe_identifier,
+        )
 
-        provider = AnimalNameProvider()
+        provider = CompositeNameProvider()
+        base_pool_size = len(ADJECTIVES) * len(ANIMALS)
 
         # Generate exhaustively
-        for _ in range(len(ANIMALS) * 3):
+        for _ in range(base_pool_size + 100):
             name = provider.next_name()
             # Should always be safe
             assert _is_safe_identifier(
@@ -208,7 +215,7 @@ class TestDeterminismTests:
         result1 = obfuscate_sql(sql, seed=42)
         result2 = obfuscate_sql(sql, seed=43)
 
-        # Results should differ (different seeds = different animal sequence)
+        # Results should differ (different seeds = different identifier sequence)
         assert result1 != result2
 
     def test_same_seed_produces_identical_output(self):

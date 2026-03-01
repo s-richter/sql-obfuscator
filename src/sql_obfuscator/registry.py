@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
-from .names import AnimalNameProvider
+from .names import CompositeNameProvider
 
 
 @dataclass(frozen=True)
@@ -77,7 +77,7 @@ class IdentifierRegistry:
         seed: int | None = None,
     ) -> None:
         self._profile = profile or get_dialect_profile("tsql")
-        self._name_provider = AnimalNameProvider(
+        self._name_provider = CompositeNameProvider(
             seed=seed,
             is_safe_identifier=self._profile.is_safe_identifier,
         )

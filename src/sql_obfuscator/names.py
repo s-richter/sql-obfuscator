@@ -59,28 +59,35 @@ def bracket_if_needed(value: str) -> str:
     return f"[{escaped}]"
 
 
-def _load_animals() -> list[str]:
-    path = Path(__file__).with_name("identifier_replacements.txt")
+def _load_word_list(filename: str, *, description: str) -> list[str]:
+    path = Path(__file__).with_name(filename)
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         raise RuntimeError(
-            f"Unable to load identifier replacements from: {path}") from exc
+            f"Unable to load {description} from: {path}") from exc
 
-    animals = [line.strip() for line in lines if line.strip()]
-    if not animals:
-        raise RuntimeError(f"Identifier replacements file is empty: {path}")
-    return animals
-
-
-ANIMALS = _load_animals()
+    words = [line.strip() for line in lines if line.strip()]
+    if not words:
+        raise RuntimeError(f"{description.capitalize()} file is empty: {path}")
+    return words
 
 
-class AnimalNameProvider:
-    """Generates unique animal-based names.
+ADJECTIVES = _load_word_list(
+    "identifier_adjectives.txt",
+    description="identifier adjectives",
+)
+ANIMALS = _load_word_list(
+    "identifier_replacements.txt",
+    description="identifier replacements",
+)
 
-    All generated names are guaranteed to be safe T-SQL identifiers
-    (not reserved keywords and matching valid identifier syntax).
+
+class CompositeNameProvider:
+    """Generates unique adjective-animal identifier names.
+
+    All generated names are guaranteed to be safe identifiers for the
+    configured dialect, or raise if no safe base names exist.
     """
 
     def __init__(
@@ -91,10 +98,15 @@ class AnimalNameProvider:
     ) -> None:
         self._is_safe_identifier = is_safe_identifier
         self._rng = random.Random(seed)
-        self._available = ANIMALS.copy()
+        self._available = [
+            f"{adjective}_{animal}"
+            for adjective in ADJECTIVES
+            for animal in ANIMALS
+        ]
         self._rng.shuffle(self._available)
         self._safe_bases = [
-            name for name in ANIMALS if self._is_safe_identifier(name)]
+            name for name in self._available if self._is_safe_identifier(name)
+        ]
         self._used: set[str] = set()
         self._suffix_counter: dict[str, int] = {}
 
@@ -106,7 +118,7 @@ class AnimalNameProvider:
             are pre-filtered for safety, bracketing is not needed.
 
         Raises:
-            RuntimeError: If all animal names are exhausted and no
+            RuntimeError: If all base names are exhausted and no
                 safe base is available for suffixed fallback.
         """
         while self._available:
@@ -121,7 +133,8 @@ class AnimalNameProvider:
         if not self._safe_bases:
             raise RuntimeError(
                 "No safe identifier replacements available. "
-                "Update identifier_replacements.txt with valid non-keyword names."
+                "Update identifier_adjectives.txt and identifier_replacements.txt "
+                "with valid non-keyword names."
             )
 
         base = self._rng.choice(self._safe_bases)
@@ -132,3 +145,6 @@ class AnimalNameProvider:
             candidate = f"{base}{self._suffix_counter[base]}"
         self._used.add(candidate)
         return candidate
+
+
+AnimalNameProvider = CompositeNameProvider

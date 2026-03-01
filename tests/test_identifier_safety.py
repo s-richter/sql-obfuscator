@@ -141,42 +141,44 @@ class TestOutputParseability:
 class TestNoReservedKeywordCollisions:
     def test_generated_names_are_safe(self):
         """All generated names should be safe (not keywords)."""
-        from sql_obfuscator.names import AnimalNameProvider
+        from sql_obfuscator.names import ADJECTIVES, ANIMALS, CompositeNameProvider
 
-        provider = AnimalNameProvider()
-        for _ in range(100):
+        provider = CompositeNameProvider()
+        for _ in range(min(len(ADJECTIVES) * len(ANIMALS), 100)):
             name = provider.next_name()
             assert _is_safe_identifier(
                 name), f"Generated name {name} is not safe"
+            assert "_" in name
 
     def test_generated_suffixed_names_are_safe(self):
         """Even suffixed fallback names should be safe."""
-        from sql_obfuscator.names import AnimalNameProvider, ANIMALS
+        from sql_obfuscator.names import ADJECTIVES, ANIMALS, CompositeNameProvider
 
-        provider = AnimalNameProvider()
-        # Exhaust the animal list multiple times to force suffixed names
-        for _ in range(len(ANIMALS) * 3):
+        provider = CompositeNameProvider()
+        base_pool_size = len(ADJECTIVES) * len(ANIMALS)
+        for _ in range(base_pool_size + 50):
             name = provider.next_name()
             assert _is_safe_identifier(
                 name
             ), f"Generated suffixed name {name} is not safe"
+        assert any(char.isdigit() for char in name)
 
     def test_deterministic_generation_consistent(self):
         """Same seed should produce same sequence of names."""
-        from sql_obfuscator.names import AnimalNameProvider
+        from sql_obfuscator.names import CompositeNameProvider
 
-        provider1 = AnimalNameProvider(seed=42)
-        provider2 = AnimalNameProvider(seed=42)
+        provider1 = CompositeNameProvider(seed=42)
+        provider2 = CompositeNameProvider(seed=42)
 
         for _ in range(50):
             assert provider1.next_name() == provider2.next_name()
 
     def test_different_seeds_produce_different_sequences(self):
         """Different seeds should produce different name sequences."""
-        from sql_obfuscator.names import AnimalNameProvider
+        from sql_obfuscator.names import CompositeNameProvider
 
-        provider1 = AnimalNameProvider(seed=42)
-        provider2 = AnimalNameProvider(seed=43)
+        provider1 = CompositeNameProvider(seed=42)
+        provider2 = CompositeNameProvider(seed=43)
 
         names1 = [provider1.next_name() for _ in range(10)]
         names2 = [provider2.next_name() for _ in range(10)]
