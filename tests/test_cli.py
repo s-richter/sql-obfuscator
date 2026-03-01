@@ -980,6 +980,7 @@ def test_cli_translate_validate_failure_returns_nonzero(tmp_path: Path, monkeypa
     from sql_obfuscator import translation
 
     sql_file = tmp_path / "input.sql"
+    workspace = tmp_path / "translate_ws"
     sql_file.write_text("SELECT [UserId] FROM [Users];", encoding="utf-8")
     original_parse = translation.parse
 
@@ -1000,12 +1001,16 @@ def test_cli_translate_validate_failure_returns_nonzero(tmp_path: Path, monkeypa
             "--target-dialect",
             "hive",
             "--validate",
+            "--workspace",
+            str(workspace),
         ]
     )
     captured = capsys.readouterr()
 
     assert rc == 1
     assert "failed=" in captured.out
+    assert (workspace / "translated.sql").exists() is False
+    assert (workspace / "reports" / "translation_report.json").exists()
 
 
 def test_cli_translate_workspace_default_translated_sql(tmp_path: Path, capsys):
@@ -1056,6 +1061,7 @@ def test_cli_translate_stdin_prints_translated_sql(tmp_path: Path, monkeypatch, 
 
 def test_cli_translate_stdout_only_skips_default_output_file(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
+    workspace = tmp_path / "translate_ws"
     sql_file.write_text("SELECT TOP 1 UserId FROM Users;", encoding="utf-8")
 
     rc = main(
@@ -1068,6 +1074,8 @@ def test_cli_translate_stdout_only_skips_default_output_file(tmp_path: Path, cap
             "--target-dialect",
             "hive",
             "--stdout-only",
+            "--workspace",
+            str(workspace),
         ]
     )
     captured = capsys.readouterr()
@@ -1076,6 +1084,8 @@ def test_cli_translate_stdout_only_skips_default_output_file(tmp_path: Path, cap
     assert "translate summary:" in captured.out
     assert "LIMIT 1" in captured.out
     assert (tmp_path / "input_hive.sql").exists() is False
+    assert (workspace / "translated.sql").exists() is False
+    assert (workspace / "reports" / "translation_report.json").exists()
 
 
 def test_cli_translate_output_dir_writes_translated_output_to_directory(tmp_path: Path, capsys):

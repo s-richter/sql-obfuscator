@@ -136,6 +136,9 @@ def save_workspace_artifacts(
         _write_json(workspace_path / "redaction.schema.json", REDACTION_JSON_SCHEMA)
         _write_json(workspace_path / "redaction.json", redaction_payload)
         tracked_files.append("redaction.json")
+    else:
+        _remove_if_exists(workspace_path / "redaction.json")
+        _remove_if_exists(workspace_path / "redaction.schema.json")
     _write_json(
         workspace_path / "integrity.json",
         _build_integrity_payload(workspace_path, tracked_files=tracked_files),
@@ -266,6 +269,8 @@ def save_translation_artifacts(
     _write_json(reports_path / "translation_report.json", report_payload)
     if translated_sql is not None:
         _write_text(workspace_path / "translated.sql", translated_sql)
+    else:
+        _remove_if_exists(workspace_path / "translated.sql")
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -283,6 +288,15 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         )
     except OSError as exc:
         raise WorkspaceError(f"Unable to write workspace file: {path}") from exc
+
+
+def _remove_if_exists(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to remove stale workspace file: {path}") from exc
 
 
 def _sha256_file(path: Path) -> str:

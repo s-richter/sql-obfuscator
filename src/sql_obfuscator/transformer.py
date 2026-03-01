@@ -126,16 +126,16 @@ def _rename_table(
     if not isinstance(identifier, exp.Identifier):
         return table
 
-        if _is_update_alias_target(table):
-            # UPDATE alias target should follow alias obfuscation, not table-name obfuscation.
-            identifier.set(
-                "this",
-                registry.get_or_create(
-                    _identifier_raw(identifier, profile=profile) or identifier.name,
-                    kind="alias",
-                    role="update_target_alias",
-                    **context,
-                ),
+    if _is_update_alias_target(table):
+        # UPDATE alias target should follow alias obfuscation, not table-name obfuscation.
+        identifier.set(
+            "this",
+            registry.get_or_create(
+                _identifier_raw(identifier, profile=profile) or identifier.name,
+                kind="alias",
+                role="update_target_alias",
+                **context,
+            ),
         )
         return table
 

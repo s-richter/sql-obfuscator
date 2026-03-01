@@ -77,7 +77,7 @@ python obfuscator.py roundtrip script.sql --diff-report
 # Translate SQL between dialects
 python obfuscator.py translate --input script.sql --source-dialect tsql --target-dialect hive --validate
 
-# Translate from file and print translated SQL only
+# Translate from file and print the summary plus translated SQL
 python obfuscator.py translate --input script.sql --source-dialect tsql --target-dialect hive --stdout-only
 
 # Translate from stdin to stdout
@@ -325,13 +325,13 @@ Options:
 - `--validate`: parse translated SQL with target dialect and fail on parse errors
 - `--workspace <dir>`: optional path to persist `reports/translation_report.json`
 - `--report-only`: write no translated SQL file; only print summary and optional report artifact
-- `--stdout-only`: print translated SQL to stdout without writing translated SQL output files
+- `--stdout-only`: print translated SQL to stdout without writing translated SQL output files (including workspace `translated.sql`)
 - `--output-dir <dir>`: write translated SQL output file into a specific directory (file input only)
 
 Output:
 
 - Always prints `translate summary: source=... target=... statements=... failed=... warnings=...`
-- Translated SQL is printed to stdout when `--stdout-only` is used
+- Translated SQL is printed to stdout after the summary line when `--stdout-only` is used
 - For stdin input (`--input -`) with no `--out` and no `--output-dir`, translated SQL is printed to stdout
 - Returns `0` when translation succeeds and optional validation passes
 - Returns `1` on read/parse/translation/validation/report-write failures

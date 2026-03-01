@@ -11,8 +11,8 @@ Each section includes:
 Note on examples:
 
 - The SQL output examples below were captured from real CLI runs.
-- The identifier replacements in the current generator are animal based.
-- If `--seed` is not set, exact animal identifier names can differ between runs.
+- The identifier replacements in the current generator are adjective-animal combinations.
+- If `--seed` is not set, exact generated identifier names can differ between runs.
 - The app uses `sqlglot` to parse, and the SQL output is formatted with the option `pretty=True`, meaning the SQL output in the examples below doesn't keep the format used in the SQL input.
 - You can use `-` as input for `obfuscate`, `roundtrip`, and `translate --input -` to read SQL from stdin.
 - You can use `--stdout-only` to print SQL output without writing sibling/default SQL output files.
@@ -553,7 +553,7 @@ python obfuscator.py obfuscate sample.sql --stdout-only
 # Write obfuscated output file into artifacts/sql/
 python obfuscator.py obfuscate sample.sql --output-dir artifacts/sql
 
-# Print translated SQL only
+# Print the summary plus translated SQL
 python obfuscator.py translate --input sample.sql --source-dialect tsql --target-dialect hive --stdout-only
 
 # Write translated SQL into artifacts/sql/
@@ -661,7 +661,7 @@ Expected result:
 - Default/file input: translated SQL file is written next to input.
 - `--out`: translated SQL is written only to the specified path.
 - `--output-dir`: translated SQL is written in the specified directory.
-- `--stdout-only`: translated SQL is printed, no translated SQL file is written.
+- `--stdout-only`: translated SQL is printed after the summary line, and no translated SQL file is written, including workspace `translated.sql`.
 - `--report-only`: no translated SQL file is written; summary/report artifacts only.
 - Invalid combinations fail fast:
   - `--out` + `--output-dir`

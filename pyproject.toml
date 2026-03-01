@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sql-obfuscator"
 version = "0.1.0"
-description = "AST-based SQL identifier obfuscator for T-SQL scripts."
+description = "AST-based SQL identifier obfuscator for T-SQL and Hive scripts."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,6 +25,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+sql_obfuscator = ["*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

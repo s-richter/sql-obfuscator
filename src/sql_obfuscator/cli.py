@@ -212,7 +212,7 @@ def _add_deobfuscate_args(
 
 def build_command_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="obfuscator.py",
+        prog="sql-obfuscator",
         description="SQL obfuscation workspace commands.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -832,17 +832,23 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         f"warnings={len(result.warnings)}"
     )
 
+    translation_succeeded = result.failed_statement_count == 0 and (not args.validate or result.validated)
     if args.workspace:
         workspace_path = Path(args.workspace)
         save_translation_artifacts(
             workspace_path=workspace_path,
             report_payload=asdict(result),
-            translated_sql=result.output_sql if args.out is None and not args.report_only else None,
+            translated_sql=(
+                result.output_sql
+                if translation_succeeded
+                and args.out is None
+                and not args.report_only
+                and not args.stdout_only
+                else None
+            ),
         )
 
-    if result.failed_statement_count > 0:
-        return 1
-    if args.validate and not result.validated:
+    if not translation_succeeded:
         return 1
     if args.report_only:
         return 0

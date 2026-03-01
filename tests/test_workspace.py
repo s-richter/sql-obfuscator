@@ -10,6 +10,7 @@ from sql_obfuscator.workspace import (
     load_context_payload,
     load_mapping_payload,
     load_redaction_payload,
+    save_workspace_artifacts,
     save_translation_artifacts,
 )
 
@@ -71,6 +72,95 @@ def test_save_translation_artifacts_writes_report_and_optional_sql(tmp_path: Pat
     assert (workspace / "translated.sql").exists()
     assert (workspace / "reports" / "translation_report.json").exists()
     assert (workspace / "reports" / "translation_report.schema.json").exists()
+
+
+def test_save_translation_artifacts_removes_stale_translated_sql_when_not_provided(tmp_path: Path):
+    workspace = tmp_path / "translate_ws"
+    payload = {
+        "source_dialect": "tsql",
+        "target_dialect": "hive",
+        "batch_count": 1,
+        "statement_count": 1,
+        "translated_statement_count": 1,
+        "failed_statement_count": 0,
+        "warnings": [],
+        "failures": [],
+        "validated": True,
+    }
+    save_translation_artifacts(
+        workspace_path=workspace,
+        report_payload=payload,
+        translated_sql="SELECT 1",
+    )
+    assert (workspace / "translated.sql").exists()
+
+    save_translation_artifacts(
+        workspace_path=workspace,
+        report_payload=payload,
+        translated_sql=None,
+    )
+    assert (workspace / "translated.sql").exists() is False
+
+
+def test_save_workspace_artifacts_removes_stale_redaction_files(tmp_path: Path):
+    workspace = tmp_path / "sample.obf"
+    mapping_payload = {
+        "schema_version": 1,
+        "entries": [],
+        "forward_index": {},
+        "reverse_index": {},
+    }
+    context_payload = {
+        "schema_version": 1,
+        "dialect": "tsql",
+        "seed": None,
+        "pretty": True,
+        "redact_literals": True,
+        "strip_comments": False,
+        "redaction_mode": "reversible",
+        "redaction_policy": "all",
+        "sensitive_columns": [],
+        "batch_count": 1,
+        "statement_count": 1,
+        "mapping_entry_count": 0,
+    }
+    redaction_payload = {
+        "schema_version": 1,
+        "mode": "reversible",
+        "entries": [
+            {
+                "placeholder": "__SQL_OBFUSCATOR_STR_000001__",
+                "original_this": "secret",
+                "is_string": True,
+            }
+        ],
+    }
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "one.sql",
+        original_sql="SELECT 'secret';",
+        obfuscated_sql="SELECT '__SQL_OBFUSCATOR_STR_000001__';",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        redaction_payload=redaction_payload,
+    )
+    assert (workspace / "redaction.json").exists()
+    assert (workspace / "redaction.schema.json").exists()
+
+    context_payload = dict(context_payload)
+    context_payload["redaction_mode"] = "none"
+    context_payload["redact_literals"] = False
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "two.sql",
+        original_sql="SELECT 1;",
+        obfuscated_sql="SELECT 1;",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        redaction_payload=None,
+    )
+    assert (workspace / "redaction.json").exists() is False
+    assert (workspace / "redaction.schema.json").exists() is False
 
 
 def test_load_redaction_payload_valid(tmp_path: Path):

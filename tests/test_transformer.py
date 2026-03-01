@@ -1,4 +1,6 @@
-﻿from sql_obfuscator.pipeline import obfuscate_sql
+import re
+
+from sql_obfuscator.pipeline import obfuscate_sql
 
 
 def test_select_join_renames_tables_columns_and_aliases_keeps_schema():
@@ -35,13 +37,20 @@ def test_temp_table_name_and_columns_are_renamed():
 
 def test_update_alias_target_is_renamed_consistently():
     sql = "UPDATE u SET u.UserId = 1 FROM Users u"
-    output = obfuscate_sql(sql, seed=1)
+    output = obfuscate_sql(sql, seed=1, pretty=False)
 
     assert output.startswith("UPDATE ")
     assert output.startswith("UPDATE u ") is False
     assert "FROM " in output
     assert " AS u " not in output
     assert "UserId" not in output
+    match = re.fullmatch(
+        r"UPDATE (?P<alias>[A-Za-z_][A-Za-z0-9_]*) "
+        r"SET (?P=alias)\.[A-Za-z_][A-Za-z0-9_]* = 1 "
+        r"FROM [A-Za-z_][A-Za-z0-9_]* AS (?P=alias)",
+        output,
+    )
+    assert match is not None, output
 
 
 def test_expression_alias_is_renamed():

@@ -41,3 +41,14 @@ def test_readme_and_cli_help_match_recent_flags():
         for flag in flags:
             assert flag in help_text
             assert flag in readme_text
+
+
+def test_docs_describe_translate_stdout_only_semantics():
+    root = Path(__file__).resolve().parents[1]
+    readme_text = (root / "README.md").read_text(encoding="utf-8")
+    tutorial_text = (root / "docs" / "COMMAND_TUTORIAL.md").read_text(encoding="utf-8")
+
+    assert "including workspace `translated.sql`" in readme_text
+    assert "after the summary line" in readme_text
+    assert "including workspace `translated.sql`" in tutorial_text
+    assert "after the summary line" in tutorial_text
