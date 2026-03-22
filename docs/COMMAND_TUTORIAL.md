@@ -29,8 +29,11 @@ Note on examples:
 - `integrity tracking`: checksum validation that detects changed/tampered workspace artifacts.
 - `placeholder`: a temporary token used in reversible literal redaction so original literal values can be restored.
 - `dialect`: SQL flavor (`tsql`, `hive`) used for parsing and output generation.
-- `statement anchor`: stable per-statement metadata with IDs such as `stmt_0001`, used for bounded LLM edits and restore matching.
-- `statement replacement`: a structured JSON edit that replaces one known statement by `statement_id` while leaving untouched statements unchanged.
+- `statement anchor`: stable per-statement metadata attached to one statement in the obfuscated script. It gives that statement an ID such as `stmt_0001` and helps the tool match edits/restores back to the right place.
+- `statement replacement`: a structured JSON edit that says "replace statement X with this SQL" instead of asking the LLM to rewrite the whole file.
+- `bounded external LLM sharing`: the conservative workflow used when obfuscated SQL will be sent to an LLM outside your immediate trust boundary, such as a hosted API. `bounded` means the model is expected to make small, local edits while keeping obfuscated identifiers, placeholders, and overall structure stable.
+- `fail closed`: stop with an error instead of continuing when a safety condition is not met. In this tool, `--llm-safe` uses fail-closed behavior.
+- `expert mode`: the less-constrained workflow where you intentionally allow larger rewrites or manual full-script edits and accept that more review may be needed afterward.
 - `unresolved`: the tool could not confidently map an obfuscated identifier/placeholder back to an original value.
 - `ambiguous`: multiple possible restore targets exist, so the tool cannot safely choose one.
 - `low-confidence`: a best match was found, but with reduced confidence due to structural edits.
@@ -205,6 +208,11 @@ What this does:
 - Redacts literals for LLM sharing, without storing restore mapping data.
 - Fails closed when parser fallback/raw passthrough leaves statements that are not approved for bounded external LLM sharing.
 
+Plain-language note:
+
+- `Fails closed` means the command stops with an error instead of continuing and producing a workspace that might be mistaken for safe-to-share output.
+- `Bounded external LLM sharing` means a cautious workflow for sending obfuscated SQL to an outside LLM while expecting edit-sized changes, not a full rewrite of the script.
+
 Command:
 
 ```bash
@@ -303,11 +311,29 @@ WHERE
 
 ## 5a) Preferred bounded-edit application with `apply-llm-edits`
 
+`apply-llm-edits` is the bridge between obfuscation and de-obfuscation in the recommended LLM workflow. You normally use it after the LLM has responded, but before running `deobfuscate` or `validate-before-write`.
+
+Why this command exists:
+
+- It gives the LLM a narrower job: change only the statements you intend to change.
+- It preserves every untouched statement exactly as it appeared in `obfuscated.sql`.
+- It catches common response mistakes early, before restore is attempted.
+- It reduces the chance of structural drift that can lead to low-confidence or unresolved restore results.
+
+Where it fits in the workflow:
+
+1. `obfuscate` creates `obfuscated.sql`, `context.json`, and `llm_instructions.md`.
+2. The LLM reads `obfuscated.sql` and `llm_instructions.md`.
+3. The LLM returns `llm_edits.json` using the `statement_replacements` format.
+4. `apply-llm-edits` validates that payload and writes `llm_response_obfuscated.sql`.
+5. `deobfuscate --dry-run` or `validate-before-write` then uses `llm_response_obfuscated.sql` as input.
+
 LLM input/output in the recommended workflow:
 
 - Give the LLM `sample.obf/obfuscated.sql` and `sample.obf/llm_instructions.md`.
 - Ask it to return JSON `statement_replacements` instead of a full rewritten script.
 - Each edit targets one known `statement_id` and must contain exactly one replacement SQL statement that still uses the obfuscated identifiers from the workspace.
+- In practical terms, this means the LLM should keep the obfuscated table names, column names, aliases, and any placeholder literals it sees unless the change truly requires otherwise.
 
 Example `sample.obf/llm_edits.json`:
 
@@ -326,10 +352,20 @@ Example `sample.obf/llm_edits.json`:
 
 What this does:
 
-- Validates that each edit references a known `statement_id`.
-- Validates that each `sql` value contains exactly one statement.
+- Validates that each edit references a known `statement_id` from the workspace instructions/context.
+- Validates that each `sql` value contains exactly one statement, so one edit cannot silently rewrite multiple statements.
 - Rebuilds `llm_response_obfuscated.sql` while preserving untouched statements exactly from `obfuscated.sql`.
 - Writes an edit-application report you can inspect before restore.
+
+When to use this command:
+
+- Use it for the normal LLM-assisted workflow where the model is making targeted statement-level changes.
+- Use it when you want a safer handoff between the LLM output and the restore step.
+- Prefer it over manual full-file editing whenever the requested SQL change can be expressed as one or more statement replacements.
+
+When you might not use it:
+
+- If you are intentionally doing an expert-mode full-script rewrite and accept the extra review/risk that comes with broader structural edits.
 
 Command:
 
@@ -348,9 +384,9 @@ Command options used:
 
 Expected result:
 
-- `sample.obf/llm_response_obfuscated.sql` is written by default.
+- `sample.obf/llm_response_obfuscated.sql` is written by default. This is the file you usually pass to `deobfuscate --dry-run` or `validate-before-write` next.
 - `sample.obf/reports/llm_edit_application_report.json` is written after a non-dry-run apply.
-- Untouched statements remain byte-for-byte identical to the original `obfuscated.sql`.
+- Untouched statements remain byte-for-byte identical to the original `obfuscated.sql`, which is the main safety advantage of this workflow.
 - The command fails fast for unknown `statement_id` values, duplicate edits, stale workspaces without anchor SQL, parse errors, or multi-statement replacements.
 
 ### Optional selective redaction policies
