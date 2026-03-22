@@ -553,6 +553,8 @@ def _build_deobfuscation_summary(report: dict) -> dict:
         "unknown_count": report.get("unknown_count", 0),
         "ambiguous_count": report.get("ambiguous_count", 0),
         "low_confidence_count": report.get("low_confidence_count", 0),
+        "matched_statement_anchor_count": report.get("matched_statement_anchor_count", 0),
+        "unmatched_statement_anchor_count": report.get("unmatched_statement_anchor_count", 0),
         "redaction_unknown_placeholder_count": (
             redaction_report.get("unknown_placeholder_count", 0)
             if isinstance(redaction_report, dict)
@@ -903,6 +905,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"pretty: {context_payload.get('pretty')}",
         f"batches: {context_payload.get('batch_count')}",
         f"statements: {context_payload.get('statement_count')}",
+        f"statement anchors: {len(context_payload.get('statement_anchors', []))}",
         f"mapping entries: {context_payload.get('mapping_entry_count')}",
         f"mapping forward index size: {len(mapping_payload.get('forward_index', {}))}",
         f"mapping reverse index size: {len(mapping_payload.get('reverse_index', {}))}",

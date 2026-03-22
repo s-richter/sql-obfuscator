@@ -11,6 +11,7 @@ from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
+from .statement_anchors import build_statement_anchor_matches, match_to_payload
 
 
 @dataclass
@@ -290,8 +291,34 @@ def _strip_temp_prefix(value: str, temp_prefix: str) -> str:
     return value
 
 
+def _statement_anchor_fields(statement_anchor: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(statement_anchor, dict):
+        return {}
+    fields: dict[str, Any] = {}
+    statement_id = statement_anchor.get("statement_id")
+    if isinstance(statement_id, str):
+        fields["statement_id"] = statement_id
+    for source, target in (
+        ("anchor_batch_index", "anchor_batch_index"),
+        ("anchor_statement_index", "anchor_statement_index"),
+        ("anchor_global_statement_index", "anchor_global_statement_index"),
+        ("match_strategy", "statement_anchor_match_strategy"),
+        ("match_score", "statement_anchor_match_score"),
+    ):
+        value = statement_anchor.get(source)
+        if value is not None:
+            fields[target] = value
+    return fields
+
+
 def _record_unknown(
-    report: dict[str, Any], *, value: str, kind: str, batch_index: int, statement_index: int
+    report: dict[str, Any],
+    *,
+    value: str,
+    kind: str,
+    batch_index: int,
+    statement_index: int,
+    statement_anchor: dict[str, Any] | None = None,
 ) -> None:
     report["unknown_identifiers"].append(
         {
@@ -299,6 +326,7 @@ def _record_unknown(
             "kind": kind,
             "batch_index": batch_index,
             "statement_index": statement_index,
+            **_statement_anchor_fields(statement_anchor),
         }
     )
 
@@ -311,6 +339,7 @@ def _record_ambiguous(
     batch_index: int,
     statement_index: int,
     candidate_count: int,
+    statement_anchor: dict[str, Any] | None = None,
 ) -> None:
     report["ambiguous_identifiers"].append(
         {
@@ -319,6 +348,7 @@ def _record_ambiguous(
             "batch_index": batch_index,
             "statement_index": statement_index,
             "candidate_count": candidate_count,
+            **_statement_anchor_fields(statement_anchor),
         }
     )
 
@@ -333,6 +363,7 @@ def _record_low_confidence(
     confidence: int,
     pass_name: str,
     candidate_count: int,
+    statement_anchor: dict[str, Any] | None = None,
 ) -> None:
     report["low_confidence_mappings"].append(
         {
@@ -343,6 +374,7 @@ def _record_low_confidence(
             "confidence": confidence,
             "pass": pass_name,
             "candidate_count": candidate_count,
+            **_statement_anchor_fields(statement_anchor),
         }
     )
 
@@ -423,12 +455,19 @@ def _resolve_and_apply(
     obfuscated_lexeme: str,
     kind: str,
     role: str,
-    batch_index: int,
-    statement_index: int,
+    current_batch_index: int,
+    current_statement_index: int,
+    resolution_batch_index: int,
+    resolution_statement_index: int,
+    statement_anchor: dict[str, Any] | None,
     profile: DialectProfile,
     fallback_kinds: tuple[str, ...] = (),
 ) -> _ReverseEntry | None:
-    context = _resolution_context(node, batch_index=batch_index, statement_index=statement_index)
+    context = _resolution_context(
+        node,
+        batch_index=resolution_batch_index,
+        statement_index=resolution_statement_index,
+    )
     kinds_to_try = (kind, *fallback_kinds)
     resolved: _ResolutionOutcome | None = None
     resolved_kind = kind
@@ -436,8 +475,8 @@ def _resolve_and_apply(
         resolved = resolver.resolve(
             obfuscated_lexeme,
             kind=candidate_kind,
-            batch_index=batch_index,
-            statement_index=statement_index,
+            batch_index=resolution_batch_index,
+            statement_index=resolution_statement_index,
             scope_id=str(context["scope_id"]),
             parent_kind=str(context["parent_kind"]),
             role=role,
@@ -456,25 +495,27 @@ def _resolve_and_apply(
                 report,
                 value=obfuscated_lexeme,
                 kind=kind,
-                batch_index=batch_index,
-                statement_index=statement_index,
+                batch_index=current_batch_index,
+                statement_index=current_statement_index,
                 candidate_count=len(candidates),
+                statement_anchor=statement_anchor,
             )
         else:
             _record_unknown(
                 report,
                 value=obfuscated_lexeme,
                 kind=kind,
-                batch_index=batch_index,
-                statement_index=statement_index,
+                batch_index=current_batch_index,
+                statement_index=current_statement_index,
+                statement_anchor=statement_anchor,
             )
         return None
     occurrence_spelling = _resolve_occurrence_spelling(
         resolved.entry,
         kind=kind,
         current_was_quoted=bool(identifier.args.get("quoted")),
-        batch_index=batch_index,
-        statement_index=statement_index,
+        batch_index=resolution_batch_index,
+        statement_index=resolution_statement_index,
         scope_id=str(context["scope_id"]),
         parent_kind=str(context["parent_kind"]),
         role=role,
@@ -501,8 +542,8 @@ def _resolve_and_apply(
             report,
             value=obfuscated_lexeme,
             kind=kind,
-            batch_index=batch_index,
-            statement_index=statement_index,
+            batch_index=current_batch_index,
+            statement_index=current_statement_index,
             confidence=min(resolved.confidence, 70) if resolved_kind != kind else resolved.confidence,
             pass_name=(
                 f"{resolved.pass_name}_fallback_{resolved_kind}"
@@ -510,6 +551,7 @@ def _resolve_and_apply(
                 else resolved.pass_name
             ),
             candidate_count=resolved.candidate_count,
+            statement_anchor=statement_anchor,
         )
     return resolved.entry
 
@@ -573,8 +615,11 @@ def _transform_statement(
     *,
     resolver: _ReverseResolver,
     report: dict[str, Any],
-    batch_index: int,
-    statement_index: int,
+    current_batch_index: int,
+    current_statement_index: int,
+    resolution_batch_index: int,
+    resolution_statement_index: int,
+    statement_anchor: dict[str, Any] | None,
     profile: DialectProfile,
 ) -> Expression:
     if isinstance(statement.meta.get("raw_sql"), str):
@@ -594,8 +639,11 @@ def _transform_statement(
                 obfuscated_lexeme=profile.table_identifier_raw(identifier),
                 kind=kind,
                 role="update_target_alias" if kind == "alias" else "table_reference",
-                batch_index=batch_index,
-                statement_index=statement_index,
+                current_batch_index=current_batch_index,
+                current_statement_index=current_statement_index,
+                resolution_batch_index=resolution_batch_index,
+                resolution_statement_index=resolution_statement_index,
+                statement_anchor=statement_anchor,
                 profile=profile,
             )
             return node
@@ -613,8 +661,11 @@ def _transform_statement(
                     obfuscated_lexeme=column_id.name,
                     kind="column",
                     role="column_reference",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
             qualifier = node.args.get("table")
@@ -627,8 +678,11 @@ def _transform_statement(
                     obfuscated_lexeme=qualifier.name,
                     kind="alias",
                     role="column_qualifier",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
             return node
@@ -644,8 +698,11 @@ def _transform_statement(
                     obfuscated_lexeme=alias.this.name,
                     kind="cte",
                     role="cte_alias",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
             return node
@@ -662,8 +719,11 @@ def _transform_statement(
                     obfuscated_lexeme=node.this.name,
                     kind="alias",
                     role="table_alias",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
             for identifier in node.args.get("columns") or []:
@@ -676,8 +736,11 @@ def _transform_statement(
                         obfuscated_lexeme=identifier.name,
                         kind="column_alias",
                         role="table_alias_column",
-                        batch_index=batch_index,
-                        statement_index=statement_index,
+                        current_batch_index=current_batch_index,
+                        current_statement_index=current_statement_index,
+                        resolution_batch_index=resolution_batch_index,
+                        resolution_statement_index=resolution_statement_index,
+                        statement_anchor=statement_anchor,
                         profile=profile,
                     )
             return node
@@ -693,8 +756,11 @@ def _transform_statement(
                     obfuscated_lexeme=alias_identifier.name,
                     kind="column_alias",
                     role="projection_alias",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                     fallback_kinds=("column",),
                 )
@@ -710,16 +776,19 @@ def _transform_statement(
                     obfuscated_lexeme=node.this.name,
                     kind="column_def",
                     role="column_definition",
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
                 if resolved is not None:
                     _restore_column_def_type_lexeme(
                         node,
                         resolved,
-                        batch_index=batch_index,
-                        statement_index=statement_index,
+                        batch_index=resolution_batch_index,
+                        statement_index=resolution_statement_index,
                     )
             return node
 
@@ -736,8 +805,11 @@ def _transform_statement(
                         obfuscated_lexeme=identifier.name,
                         kind="insert_column",
                         role="insert_target_column",
-                        batch_index=batch_index,
-                        statement_index=statement_index,
+                        current_batch_index=current_batch_index,
+                        current_statement_index=current_statement_index,
+                        resolution_batch_index=resolution_batch_index,
+                        resolution_statement_index=resolution_statement_index,
+                        statement_anchor=statement_anchor,
                         profile=profile,
                     )
             return node
@@ -812,17 +884,19 @@ def deobfuscate_sql_with_report(
         "unknown_identifiers": [],
         "ambiguous_identifiers": [],
         "low_confidence_mappings": [],
+        "statement_anchor_matches": [],
         "batch_count": 0,
         "statement_count": 0,
     }
 
-    output_batches: list[str] = []
+    parsed_batches: list[tuple[int, str, list[Expression]]] = []
+    all_statements: list[Expression] = []
     batches = profile.split_batches(script)
     report["batch_count"] = len(batches)
 
     for batch_index, batch_sql in enumerate(batches, start=1):
         if not batch_sql.strip():
-            output_batches.append(batch_sql)
+            parsed_batches.append((batch_index, batch_sql, []))
             continue
         try:
             statements = parse_sql(batch_sql, dialect=dialect)
@@ -831,15 +905,42 @@ def deobfuscate_sql_with_report(
                 f"Parse error during de-obfuscation in batch {batch_index}/{len(batches)}: {exc}"
             ) from exc
         report["statement_count"] += len(statements)
+        parsed_batches.append((batch_index, batch_sql, statements))
+        all_statements.extend(statements)
+
+    anchor_payloads = context_payload.get("statement_anchors")
+    statement_anchor_matches = build_statement_anchor_matches(
+        all_statements,
+        dialect=dialect,
+        statement_anchor_payloads=anchor_payloads if isinstance(anchor_payloads, list) else None,
+    )
+
+    output_batches: list[str] = []
+    match_index = 0
+    for batch_index, batch_sql, statements in parsed_batches:
+        if not batch_sql.strip():
+            output_batches.append(batch_sql)
+            continue
         transformed: list[Expression] = []
         for statement_index, statement in enumerate(statements, start=1):
+            statement_match = statement_anchor_matches[match_index]
+            match_index += 1
+            statement_anchor = match_to_payload(
+                statement_match,
+                batch_index=batch_index,
+                statement_index=statement_index,
+            )
+            report["statement_anchor_matches"].append(statement_anchor)
             transformed.append(
                 _transform_statement(
                     statement,
                     resolver=resolver,
                     report=report,
-                    batch_index=batch_index,
-                    statement_index=statement_index,
+                    current_batch_index=batch_index,
+                    current_statement_index=statement_index,
+                    resolution_batch_index=statement_match.anchor_batch_index or batch_index,
+                    resolution_statement_index=statement_match.anchor_statement_index or statement_index,
+                    statement_anchor=statement_anchor,
                     profile=profile,
                 )
             )
@@ -854,6 +955,14 @@ def deobfuscate_sql_with_report(
     report["unknown_by_kind"] = _count_by_kind(report["unknown_identifiers"])
     report["ambiguous_by_kind"] = _count_by_kind(report["ambiguous_identifiers"])
     report["low_confidence_by_kind"] = _count_by_kind(report["low_confidence_mappings"])
+    report["matched_statement_anchor_count"] = sum(
+        1
+        for match in report["statement_anchor_matches"]
+        if isinstance(match.get("statement_id"), str)
+    )
+    report["unmatched_statement_anchor_count"] = (
+        len(report["statement_anchor_matches"]) - report["matched_statement_anchor_count"]
+    )
     report["recommendations"] = _recommendations(report)
     return output_sql, report
 
@@ -879,6 +988,11 @@ def _recommendations(report: dict[str, Any]) -> list[str]:
         recommendations.append(
             "Ambiguous identifier mappings were found. Keep alias/table structure closer "
             "to the obfuscated input or reduce alias rewrites."
+        )
+    if report.get("unmatched_statement_anchor_count", 0) > 0:
+        recommendations.append(
+            "Some edited statements could not be matched back to original statement anchors. "
+            "Large rewrites, duplicated statements, or reordered blocks may still require heuristic review."
         )
     if report.get("low_confidence_count", 0) > 0:
         recommendations.append(

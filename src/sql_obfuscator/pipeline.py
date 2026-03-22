@@ -12,6 +12,7 @@ from .errors import ParseScriptError
 from .redaction import apply_redaction
 from .registry import IdentifierRegistry
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
+from .statement_anchors import anchor_to_payload, build_statement_anchor
 from .transformer import transform_statements
 
 _GO_STANDALONE_RE = re.compile(r"^\s*GO\s*$", re.IGNORECASE)
@@ -23,6 +24,7 @@ class _ProcessedBatch:
     output_sql: str
     statement_count: int
     fallback_preserved_statement_count: int
+    statement_anchors: list[dict[str, Any]]
 
 
 def _extract_context_snippet(sql: str, max_length: int = 100) -> str:
@@ -61,9 +63,15 @@ def _process_batch(
     pretty: bool = False,
     batch_number: int = 1,
     total_batches: int = 1,
+    statement_start_index: int = 1,
 ) -> _ProcessedBatch:
     if not batch_sql.strip():
-        return _ProcessedBatch(output_sql=batch_sql, statement_count=0, fallback_preserved_statement_count=0)
+        return _ProcessedBatch(
+            output_sql=batch_sql,
+            statement_count=0,
+            fallback_preserved_statement_count=0,
+            statement_anchors=[],
+        )
 
     try:
         statements = parse_sql(batch_sql, dialect=dialect)
@@ -82,12 +90,27 @@ def _process_batch(
         dialect=dialect,
         profile=profile,
     )
+    statement_sqls: list[str] = []
+    statement_anchors: list[dict[str, Any]] = []
+    for local_statement_index, statement in enumerate(transformed, start=1):
+        statement_sql = emit_sql(statement, dialect=dialect, pretty=pretty)
+        statement_sqls.append(statement_sql)
+        statement_anchors.append(
+            anchor_to_payload(
+                build_statement_anchor(
+                    statement,
+                    dialect=dialect,
+                    batch_index=batch_number,
+                    statement_index=local_statement_index,
+                    global_statement_index=statement_start_index + local_statement_index - 1,
+                )
+            )
+        )
     return _ProcessedBatch(
-        output_sql=join_emitted_statements(
-            [emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in transformed]
-        ),
+        output_sql=join_emitted_statements(statement_sqls),
         statement_count=len(statements),
         fallback_preserved_statement_count=fallback_preserved_statement_count,
+        statement_anchors=statement_anchors,
     )
 
 
@@ -170,8 +193,10 @@ def obfuscate_sql_with_metadata(
     registry = IdentifierRegistry(profile=profile, seed=seed)
     batches = profile.split_batches(redaction_input_sql)
     transformed_batches: list[str] = []
+    statement_anchors: list[dict[str, Any]] = []
     total_statements = 0
     fallback_preserved_statement_count = 0
+    next_statement_index = 1
     for batch_idx, batch in enumerate(batches, start=1):
         processed_batch = _process_batch(
             batch,
@@ -181,10 +206,13 @@ def obfuscate_sql_with_metadata(
             pretty=pretty,
             batch_number=batch_idx,
             total_batches=len(batches),
+            statement_start_index=next_statement_index,
         )
         transformed_batches.append(processed_batch.output_sql)
+        statement_anchors.extend(processed_batch.statement_anchors)
         total_statements += processed_batch.statement_count
         fallback_preserved_statement_count += processed_batch.fallback_preserved_statement_count
+        next_statement_index += processed_batch.statement_count
 
     output_sql = profile.join_batches(transformed_batches)
     mapping_payload = registry.mapping_payload()
@@ -201,12 +229,14 @@ def obfuscate_sql_with_metadata(
         "batch_count": len(batches),
         "statement_count": total_statements,
         "mapping_entry_count": len(mapping_payload["entries"]),
+        "statement_anchors": statement_anchors,
     }
     fully_transformed_statement_count = max(0, total_statements - fallback_preserved_statement_count)
     obfuscation_report = {
         "schema_version": 1,
         "batch_count": len(batches),
         "statement_count": total_statements,
+        "statement_anchor_count": len(statement_anchors),
         "fully_transformed_statement_count": fully_transformed_statement_count,
         "fallback_preserved_statement_count": fallback_preserved_statement_count,
         "llm_safe_approved": fallback_preserved_statement_count == 0,

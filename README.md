@@ -157,6 +157,7 @@ Safety note:
 - `expert mode` is the fallback path when you knowingly accept larger rewrites, more manual review, and possible low-confidence or unresolved restore results.
 - `--llm-safe` is intended for bounded-edit sharing. It fails closed when any statement was preserved through parser compatibility fallback/raw passthrough instead of going through the normal AST obfuscation path.
 - `reports/llm_workflow_report.json` summarizes total statements, fully transformed statements, fallback-preserved statements, redaction counts, and later unresolved/ambiguous/low-confidence de-obfuscation counts.
+- `context.json` now stores stable `statement_anchors`, and generated `llm_instructions.md` exposes those IDs for constrained edit workflows.
 
 ## Workspace Model
 
@@ -491,7 +492,7 @@ If this fails with an LLM-safe validation error, inspect `script.obf/reports/llm
 - `script.obf/obfuscated.sql`
 - `script.obf/llm_instructions.md`
 
-The default instructions distinguish recommended bounded-edit behavior from expert mode guardrails.
+The default instructions distinguish recommended bounded-edit behavior from expert mode guardrails. They also list stable statement IDs such as `stmt_0001`, which gives you a safer unit of change when you need to discuss or review edits statement by statement.
 
 3. Save LLM output (example):
 
@@ -606,9 +607,10 @@ Meaning:
 Actions:
 
 1. Review de-obfuscated SQL manually before execution.
-2. Ask LLM to keep alias/table structure closer to obfuscated input.
-3. Re-run `--dry-run` after tightening prompt constraints.
-4. Only if you explicitly accept the risk, run with `--allow-low-confidence`.
+2. Check the reported `statement_id` values first; they identify which anchored statements need review when a match was found.
+3. Ask LLM to keep alias/table structure closer to obfuscated input.
+4. Re-run `--dry-run` after tightening prompt constraints.
+5. Only if you explicitly accept the risk, run with `--allow-low-confidence`.
 
 ### Integrity Check Failed
 

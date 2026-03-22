@@ -285,7 +285,7 @@ def test_validate_before_write_blocks_heavy_rewrite_until_explicit_override(tmp_
 
     obfuscated_sql = (workspace / "obfuscated.sql").read_text(encoding="utf-8")
     edited_path = workspace / "llm_response_obfuscated.sql"
-    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+    edited_path.write_text(f"{obfuscated_sql}; {obfuscated_sql}", encoding="utf-8")
 
     rc = main(
         [

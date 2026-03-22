@@ -46,6 +46,77 @@ def test_load_context_payload_rejects_missing_required_fields(tmp_path: Path):
         load_context_payload(context_path)
 
 
+def test_load_context_payload_accepts_statement_anchors(tmp_path: Path):
+    context_path = tmp_path / "context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "input_file": "sample.sql",
+                "dialect": "tsql",
+                "pretty": True,
+                "batch_count": 1,
+                "statement_count": 1,
+                "mapping_entry_count": 0,
+                "statement_anchors": [
+                    {
+                        "statement_id": "stmt_0001",
+                        "batch_index": 1,
+                        "statement_index": 1,
+                        "global_statement_index": 1,
+                        "statement_kind": "select",
+                        "fingerprint": "abc123",
+                        "identifier_tokens": ["x"],
+                        "placeholder_tokens": [],
+                        "fallback_preserved": False,
+                        "preview": "SELECT x",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_context_payload(context_path)
+    assert payload["statement_anchors"][0]["statement_id"] == "stmt_0001"
+
+
+
+def test_load_context_payload_rejects_invalid_statement_anchor_shape(tmp_path: Path):
+    context_path = tmp_path / "context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "input_file": "sample.sql",
+                "dialect": "tsql",
+                "pretty": True,
+                "batch_count": 1,
+                "statement_count": 1,
+                "mapping_entry_count": 0,
+                "statement_anchors": [
+                    {
+                        "statement_id": "stmt_0001",
+                        "batch_index": 1,
+                        "statement_index": 1,
+                        "global_statement_index": 1,
+                        "statement_kind": "select",
+                        "fingerprint": "abc123",
+                        "identifier_tokens": "bad",
+                        "placeholder_tokens": [],
+                        "fallback_preserved": False,
+                        "preview": "SELECT x",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="statement anchor field 'identifier_tokens'"):
+        load_context_payload(context_path)
+
+
 def test_load_mapping_payload_rejects_missing_indexes(tmp_path: Path):
     mapping_path = tmp_path / "mapping.json"
     mapping_path.write_text('{"schema_version": 1, "entries": []}', encoding="utf-8")

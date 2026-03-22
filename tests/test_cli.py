@@ -554,7 +554,7 @@ def test_cli_deobfuscate_low_confidence_non_dry_run_returns_nonzero(tmp_path: Pa
 
     obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
     edited_path = tmp_path / "edited_low_conf.sql"
-    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+    edited_path.write_text(f"{obfuscated_sql}; {obfuscated_sql}", encoding="utf-8")
 
     rc = main(
         [
@@ -580,7 +580,7 @@ def test_cli_deobfuscate_allow_low_confidence_writes_files(tmp_path: Path, capsy
 
     obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
     edited_path = tmp_path / "edited_low_conf.sql"
-    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+    edited_path.write_text(f"{obfuscated_sql}; {obfuscated_sql}", encoding="utf-8")
 
     rc = main(
         [
@@ -610,7 +610,7 @@ def test_cli_validate_before_write_fails_on_low_confidence_by_default(tmp_path: 
 
     obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
     edited_path = tmp_path / "edited_low_conf.sql"
-    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+    edited_path.write_text(f"{obfuscated_sql}; {obfuscated_sql}", encoding="utf-8")
 
     rc = main(
         [
@@ -636,7 +636,7 @@ def test_cli_validate_before_write_allow_low_confidence_writes_output(tmp_path: 
 
     obfuscated_sql = (tmp_path / "input.obf" / "obfuscated.sql").read_text(encoding="utf-8")
     edited_path = tmp_path / "edited_low_conf.sql"
-    edited_path.write_text(f"SELECT 1; {obfuscated_sql}", encoding="utf-8")
+    edited_path.write_text(f"{obfuscated_sql}; {obfuscated_sql}", encoding="utf-8")
 
     rc = main(
         [
@@ -1266,6 +1266,8 @@ def test_cli_default_llm_instructions_describe_bounded_and_expert_modes(tmp_path
     instructions = (tmp_path / "input.obf" / "llm_instructions.md").read_text(encoding="utf-8")
     assert "Recommended mode: bounded edit" in instructions
     assert "Expert mode" in instructions
+    assert "## Statement Anchors" in instructions
+    assert "`stmt_0001`" in instructions
 
 
 def test_cli_obfuscate_warns_when_fallback_preserved_statements_exist(tmp_path: Path, capsys):
@@ -1349,6 +1351,8 @@ def test_cli_deobfuscate_updates_llm_workflow_report(tmp_path: Path, capsys):
     assert report["deobfuscation_summary"]["unknown_count"] == 0
     assert report["deobfuscation_summary"]["ambiguous_count"] == 0
     assert report["deobfuscation_summary"]["low_confidence_count"] == 0
+    assert report["deobfuscation_summary"]["matched_statement_anchor_count"] == 1
+    assert report["deobfuscation_summary"]["unmatched_statement_anchor_count"] == 0
     assert report["deobfuscation_summary"]["redaction_unknown_placeholder_count"] == 0
     assert report["deobfuscation_summary"]["redaction_missing_placeholder_count"] == 0
 

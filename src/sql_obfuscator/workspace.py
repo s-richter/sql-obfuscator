@@ -131,6 +131,7 @@ def save_workspace_artifacts(
         else _default_llm_instructions(
             input_path=input_path,
             dialect=context_payload.get("dialect", "tsql"),
+            statement_anchors=context_payload.get("statement_anchors"),
         ),
     )
     _write_json(workspace_path / "mapping.schema.json", MAPPING_JSON_SCHEMA)
@@ -239,6 +240,8 @@ def save_deobfuscation_artifacts(
                 f"unknown_count: {report_payload.get('unknown_count', 0)}",
                 f"ambiguous_count: {report_payload.get('ambiguous_count', 0)}",
                 f"low_confidence_count: {report_payload.get('low_confidence_count', 0)}",
+                f"matched_statement_anchor_count: {report_payload.get('matched_statement_anchor_count', 0)}",
+                f"unmatched_statement_anchor_count: {report_payload.get('unmatched_statement_anchor_count', 0)}",
                 f"batch_count: {report_payload.get('batch_count', 0)}",
                 f"statement_count: {report_payload.get('statement_count', 0)}",
                 f"unknown_by_kind: {report_payload.get('unknown_by_kind', {})}",
@@ -511,6 +514,36 @@ def _validate_context_payload(payload: dict[str, Any], *, source: Path) -> None:
             raise WorkspaceError(f"context.json has invalid 'sensitive_columns' in {source}")
         if any(not isinstance(item, str) for item in sensitive_columns):
             raise WorkspaceError(f"context.json has invalid 'sensitive_columns' in {source}")
+    statement_anchors = payload.get("statement_anchors")
+    if statement_anchors is not None:
+        if not isinstance(statement_anchors, list):
+            raise WorkspaceError(f"context.json has invalid 'statement_anchors' in {source}")
+        for idx, anchor in enumerate(statement_anchors):
+            if not isinstance(anchor, dict):
+                raise WorkspaceError(
+                    f"context.json has invalid statement anchor at index {idx} in {source}"
+                )
+            required_fields = {
+                "statement_id": str,
+                "batch_index": int,
+                "statement_index": int,
+                "global_statement_index": int,
+                "statement_kind": str,
+                "fingerprint": str,
+                "fallback_preserved": bool,
+                "preview": str,
+            }
+            for field, expected_type in required_fields.items():
+                if not isinstance(anchor.get(field), expected_type):
+                    raise WorkspaceError(
+                        f"context.json has invalid statement anchor field '{field}' at index {idx} in {source}"
+                    )
+            for field in ("identifier_tokens", "placeholder_tokens"):
+                value = anchor.get(field)
+                if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                    raise WorkspaceError(
+                        f"context.json has invalid statement anchor field '{field}' at index {idx} in {source}"
+                    )
 
 
 def _validate_integrity_payload(payload: dict[str, Any], *, source: Path) -> None:
@@ -582,14 +615,48 @@ def _validate_llm_workflow_report_payload(payload: dict[str, Any], *, source: Pa
             )
 
 
-def _default_llm_instructions(*, input_path: Path, dialect: str) -> str:
+def _statement_anchor_instruction_lines(statement_anchors: list[dict[str, Any]] | None) -> str:
+    anchors = statement_anchors or []
+    if not anchors:
+        return ""
+    lines = [
+        "## Statement Anchors",
+        "Use these IDs when referring to specific statements or planning constrained edits.",
+    ]
+    for anchor in anchors:
+        statement_id = anchor.get("statement_id")
+        if not isinstance(statement_id, str):
+            continue
+        batch_index = anchor.get("batch_index")
+        statement_index = anchor.get("statement_index")
+        statement_kind = anchor.get("statement_kind")
+        preview = anchor.get("preview")
+        fallback_preserved = anchor.get("fallback_preserved")
+        detail = (
+            f"- `{statement_id}`: batch {batch_index}, statement {statement_index}, kind `{statement_kind}`"
+        )
+        if fallback_preserved:
+            detail += " [fallback-preserved]"
+        if isinstance(preview, str) and preview:
+            detail += f" - `{preview}`"
+        lines.append(detail)
+    return "\n".join(lines) + "\n\n"
+
+
+def _default_llm_instructions(
+    *,
+    input_path: Path,
+    dialect: str,
+    statement_anchors: list[dict[str, Any]] | None = None,
+) -> str:
     return (
         "# LLM Instructions for Obfuscated SQL\n\n"
         "You are editing an obfuscated SQL script. The output will be de-obfuscated afterward.\n\n"
         "## Input Context\n"
         f"- Original input file: `{input_path.name}`\n"
         f"- SQL dialect: `{dialect}`\n\n"
-        "## Workflow Modes\n"
+        + _statement_anchor_instruction_lines(statement_anchors)
+        + "## Workflow Modes\n"
         "- Recommended mode: bounded edit. Preserve obfuscated identifiers and overall statement structure.\n"
         "- Expert mode: larger rewrites are allowed only when explicitly required and can trigger unresolved, ambiguous, or low-confidence restore results.\n\n"
         "## Bounded-Edit Requirements\n"

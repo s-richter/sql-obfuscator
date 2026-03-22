@@ -151,7 +151,7 @@ def test_deobfuscate_roundtrip_preserves_numeric_type_lexeme():
     assert report["ambiguous_count"] == 0
 
 
-def test_deobfuscate_reports_low_confidence_after_statement_shift():
+def test_deobfuscate_statement_shift_matches_original_anchor_without_low_confidence():
     original_sql = "SELECT UserId FROM Users;"
     obfuscated = obfuscate_sql_with_metadata(original_sql, seed=42, pretty=False)
     edited_obfuscated = f"SELECT 1; {obfuscated.output_sql}"
@@ -167,7 +167,55 @@ def test_deobfuscate_reports_low_confidence_after_statement_shift():
     assert "Users" in deobfuscated_sql
     assert report["unknown_count"] == 0
     assert report["ambiguous_count"] == 0
+    assert report["low_confidence_count"] == 0
+    assert report["matched_statement_anchor_count"] == 1
+    assert report["unmatched_statement_anchor_count"] == 1
+    assert report["statement_anchor_matches"][0]["statement_id"] is None
+    assert report["statement_anchor_matches"][1]["statement_id"] == "stmt_0001"
+
+
+def test_deobfuscate_reports_low_confidence_after_duplicate_statement():
+    original_sql = "SELECT UserId FROM Users;"
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=42, pretty=False)
+    edited_obfuscated = f"{obfuscated.output_sql}; {obfuscated.output_sql}"
+
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        edited_obfuscated,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=False,
+    )
+
+    assert deobfuscated_sql.count("UserId") >= 2
+    assert report["unknown_count"] == 0
+    assert report["ambiguous_count"] == 0
     assert report["low_confidence_count"] > 0
+    assert report["matched_statement_anchor_count"] == 1
+    assert report["unmatched_statement_anchor_count"] == 1
+
+
+
+def test_deobfuscate_reports_statement_id_for_unknown_in_matched_statement():
+    original_sql = "SELECT UserId FROM Users WHERE UserId > 0;"
+    obfuscated = obfuscate_sql_with_metadata(original_sql, seed=42, pretty=False)
+    column_entry = next(
+        entry
+        for entry in obfuscated.mapping_payload["entries"]
+        if any(occ.get("kind") == "column" for occ in entry.get("occurrences", []))
+    )
+    edited_obfuscated = obfuscated.output_sql.replace(column_entry["obfuscated_lexeme"], "mystery_column", 1)
+
+    deobfuscated_sql, report = deobfuscate_sql_with_report(
+        edited_obfuscated,
+        mapping_payload=obfuscated.mapping_payload,
+        context_payload=obfuscated.context_payload,
+        pretty=False,
+    )
+
+    assert "mystery_column" in deobfuscated_sql
+    assert report["unknown_count"] > 0
+    assert report["statement_anchor_matches"][0]["statement_id"] == "stmt_0001"
+    assert report["unknown_identifiers"][0]["statement_id"] == "stmt_0001"
 
 
 def test_deobfuscate_roundtrip_restores_projection_alias_matching_column_name():
