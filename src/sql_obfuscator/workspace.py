@@ -14,6 +14,7 @@ CONTEXT_SCHEMA_VERSION = 1
 INTEGRITY_SCHEMA_VERSION = 1
 REDACTION_SCHEMA_VERSION = 1
 LLM_WORKFLOW_REPORT_SCHEMA_VERSION = 1
+PRIVACY_SUMMARY_REPORT_SCHEMA_VERSION = 1
 
 MAPPING_JSON_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -108,6 +109,27 @@ LLM_EDIT_APPLICATION_REPORT_JSON_SCHEMA: dict[str, Any] = {
     ],
 }
 
+PRIVACY_SUMMARY_REPORT_JSON_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SQL Privacy Summary Report Schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "dialect",
+        "statement_count",
+        "analyzed_statement_count",
+        "fallback_preserved_statement_count",
+        "llm_safe_blocked",
+        "manual_review_recommended",
+        "blocking_identifier_classes",
+        "warning_identifier_classes",
+        "identifier_surface",
+        "blockers",
+        "warnings",
+        "recommendations",
+    ],
+}
+
 INTEGRITY_TRACKED_FILES = [
     "original.sql",
     "obfuscated.sql",
@@ -131,6 +153,7 @@ def save_workspace_artifacts(
     llm_instructions_text: str | None = None,
     redaction_payload: dict[str, Any] | None = None,
     llm_workflow_report_payload: dict[str, Any] | None = None,
+    privacy_summary_payload: dict[str, Any] | None = None,
 ) -> None:
     try:
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -178,6 +201,14 @@ def save_workspace_artifacts(
     else:
         _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.json")
         _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.schema.json")
+    if privacy_summary_payload is not None:
+        save_privacy_summary_report(
+            workspace_path=workspace_path,
+            report_payload=privacy_summary_payload,
+        )
+    else:
+        _remove_if_exists(workspace_path / "reports" / "privacy_summary.json")
+        _remove_if_exists(workspace_path / "reports" / "privacy_summary.schema.json")
     _write_json(
         workspace_path / "integrity.json",
         _build_integrity_payload(workspace_path, tracked_files=tracked_files),
@@ -205,6 +236,12 @@ def load_redaction_payload(redaction_path: Path) -> dict[str, Any]:
 def load_llm_workflow_report(report_path: Path) -> dict[str, Any]:
     payload = _read_json(report_path)
     _validate_llm_workflow_report_payload(payload, source=report_path)
+    return payload
+
+
+def load_privacy_summary_report(report_path: Path) -> dict[str, Any]:
+    payload = _read_json(report_path)
+    _validate_privacy_summary_report_payload(payload, source=report_path)
     return payload
 
 
@@ -351,6 +388,21 @@ def save_llm_edit_application_report(
         LLM_EDIT_APPLICATION_REPORT_JSON_SCHEMA,
     )
     _write_json(reports_path / "llm_edit_application_report.json", report_payload)
+
+
+def save_privacy_summary_report(
+    *,
+    workspace_path: Path,
+    report_payload: dict[str, Any],
+) -> None:
+    reports_path = workspace_path / "reports"
+    try:
+        reports_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
+
+    _write_json(reports_path / "privacy_summary.schema.json", PRIVACY_SUMMARY_REPORT_JSON_SCHEMA)
+    _write_json(reports_path / "privacy_summary.json", report_payload)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -650,6 +702,59 @@ def _validate_llm_workflow_report_payload(payload: dict[str, Any], *, source: Pa
         ):
             raise WorkspaceError(
                 f"llm_workflow_report.json has invalid field 'recommendations' in {source}"
+            )
+
+
+def _validate_privacy_summary_report_payload(payload: dict[str, Any], *, source: Path) -> None:
+    if payload.get("schema_version") != PRIVACY_SUMMARY_REPORT_SCHEMA_VERSION:
+        raise WorkspaceError(
+            f"Unsupported privacy summary schema in {source}: {payload.get('schema_version')}"
+        )
+    if not isinstance(payload.get("dialect"), str):
+        raise WorkspaceError(f"privacy_summary.json missing/invalid field 'dialect' in {source}")
+    for field in ("statement_count", "analyzed_statement_count", "fallback_preserved_statement_count"):
+        if not isinstance(payload.get(field), int):
+            raise WorkspaceError(
+                f"privacy_summary.json missing/invalid field '{field}' in {source}"
+            )
+    for field in ("llm_safe_blocked", "manual_review_recommended"):
+        if not isinstance(payload.get(field), bool):
+            raise WorkspaceError(
+                f"privacy_summary.json missing/invalid field '{field}' in {source}"
+            )
+    for field in ("blocking_identifier_classes", "warning_identifier_classes", "blockers", "warnings", "recommendations"):
+        value = payload.get(field)
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise WorkspaceError(
+                f"privacy_summary.json has invalid field '{field}' in {source}"
+            )
+    identifier_surface = payload.get("identifier_surface")
+    if not isinstance(identifier_surface, dict):
+        raise WorkspaceError(
+            f"privacy_summary.json missing/invalid field 'identifier_surface' in {source}"
+        )
+    expected_keys = (
+        "local_variables",
+        "system_variables",
+        "user_defined_functions",
+        "custom_schema_qualifiers",
+        "common_schema_qualifiers",
+        "catalog_qualifiers",
+    )
+    for key in expected_keys:
+        bucket = identifier_surface.get(key)
+        if not isinstance(bucket, dict):
+            raise WorkspaceError(
+                f"privacy_summary.json has invalid identifier surface bucket '{key}' in {source}"
+            )
+        if not isinstance(bucket.get("occurrence_count"), int) or not isinstance(bucket.get("unique_count"), int):
+            raise WorkspaceError(
+                f"privacy_summary.json has invalid counts for identifier surface bucket '{key}' in {source}"
+            )
+        examples = bucket.get("examples")
+        if not isinstance(examples, list) or any(not isinstance(item, str) for item in examples):
+            raise WorkspaceError(
+                f"privacy_summary.json has invalid examples for identifier surface bucket '{key}' in {source}"
             )
 
 

@@ -12,6 +12,7 @@ from sql_obfuscator.workspace import (
     load_context_payload,
     load_llm_workflow_report,
     load_mapping_payload,
+    load_privacy_summary_report,
     load_redaction_payload,
     save_workspace_artifacts,
     save_translation_artifacts,
@@ -389,3 +390,110 @@ def test_load_llm_workflow_report_rejects_invalid_recommendations(tmp_path: Path
 
     with pytest.raises(WorkspaceError, match="recommendations"):
         load_llm_workflow_report(report_path)
+
+
+
+def test_save_workspace_artifacts_removes_stale_privacy_summary_report(tmp_path: Path):
+    workspace = tmp_path / "sample.obf"
+    mapping_payload = {
+        "schema_version": 1,
+        "entries": [],
+        "forward_index": {},
+        "reverse_index": {},
+    }
+    context_payload = {
+        "schema_version": 1,
+        "dialect": "tsql",
+        "seed": None,
+        "pretty": True,
+        "redact_literals": False,
+        "strip_comments": False,
+        "redaction_mode": "none",
+        "redaction_policy": "all",
+        "sensitive_columns": [],
+        "batch_count": 1,
+        "statement_count": 1,
+        "mapping_entry_count": 0,
+    }
+    privacy_summary = {
+        "schema_version": 1,
+        "dialect": "tsql",
+        "statement_count": 1,
+        "analyzed_statement_count": 1,
+        "fallback_preserved_statement_count": 0,
+        "llm_safe_blocked": False,
+        "manual_review_recommended": False,
+        "blocking_identifier_classes": [],
+        "warning_identifier_classes": [],
+        "identifier_surface": {
+            "local_variables": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+            "system_variables": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+            "user_defined_functions": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+            "custom_schema_qualifiers": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+            "common_schema_qualifiers": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+            "catalog_qualifiers": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+        },
+        "blockers": [],
+        "warnings": [],
+        "recommendations": [],
+    }
+
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "one.sql",
+        original_sql="SELECT 1;",
+        obfuscated_sql="SELECT 1;",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        privacy_summary_payload=privacy_summary,
+    )
+    assert (workspace / "reports" / "privacy_summary.json").exists()
+    assert (workspace / "reports" / "privacy_summary.schema.json").exists()
+
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "two.sql",
+        original_sql="SELECT 2;",
+        obfuscated_sql="SELECT 2;",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        privacy_summary_payload=None,
+    )
+    assert (workspace / "reports" / "privacy_summary.json").exists() is False
+    assert (workspace / "reports" / "privacy_summary.schema.json").exists() is False
+
+
+
+def test_load_privacy_summary_report_valid(tmp_path: Path):
+    report_path = tmp_path / "privacy_summary.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dialect": "tsql",
+                "statement_count": 2,
+                "analyzed_statement_count": 2,
+                "fallback_preserved_statement_count": 0,
+                "llm_safe_blocked": True,
+                "manual_review_recommended": True,
+                "blocking_identifier_classes": ["local_variables"],
+                "warning_identifier_classes": ["common_schema_qualifiers"],
+                "identifier_surface": {
+                    "local_variables": {"occurrence_count": 1, "unique_count": 1, "examples": ["@UserId"]},
+                    "system_variables": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+                    "user_defined_functions": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+                    "custom_schema_qualifiers": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+                    "common_schema_qualifiers": {"occurrence_count": 1, "unique_count": 1, "examples": ["dbo"]},
+                    "catalog_qualifiers": {"occurrence_count": 0, "unique_count": 0, "examples": []},
+                },
+                "blockers": ["1 local variable reference remains visible in obfuscated SQL: @UserId."],
+                "warnings": ["1 common schema qualifier remains visible in obfuscated SQL: dbo."],
+                "recommendations": ["review before sharing"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_privacy_summary_report(report_path)
+    assert payload["llm_safe_blocked"] is True
+    assert payload["identifier_surface"]["local_variables"]["occurrence_count"] == 1

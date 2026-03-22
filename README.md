@@ -7,7 +7,7 @@ Start here for a scenario-based walkthrough of commands, flags, and expected out
 - [Command Tutorial](docs/COMMAND_TUTORIAL.md)
 
 **NOTE**: the code and the documentation in this repository was largely written by **GPT-5.3-Codex Medium**.
-**NOTE**: Due to limitations in the library used for parsing especially T-SQL scripts (_sqlglot_), certain advanced scripts might not be parsed correctly. If this is the case, using an LLM to fix edge cases is the simplest option. Use `--llm-safe` when preparing scripts for an external LLM so parser-compatibility fallback is surfaced before sharing.
+**NOTE**: Due to limitations in the library used for parsing especially T-SQL scripts (_sqlglot_), certain advanced scripts might not be parsed correctly. If this is the case, using an LLM to fix edge cases is the simplest option. Use `--llm-safe` when preparing scripts for an external LLM so parser-compatibility fallback and still-visible identifier surfaces such as local variables, custom schema qualifiers, or user-defined function names are surfaced before sharing.
 
 ## What It Does
 
@@ -156,8 +156,9 @@ Safety note:
 
 - `bounded-edit` is the recommended external LLM workflow. Keep obfuscated identifiers, aliases, placeholder literals, and overall statement structure stable.
 - `expert mode` is the fallback path when you knowingly accept larger rewrites, more manual review, and possible low-confidence or unresolved restore results.
-- `--llm-safe` is intended for bounded-edit sharing. It fails closed when any statement was preserved through parser compatibility fallback/raw passthrough instead of going through the normal AST obfuscation path.
-- `reports/llm_workflow_report.json` summarizes total statements, fully transformed statements, fallback-preserved statements, redaction counts, and later unresolved/ambiguous/low-confidence de-obfuscation counts.
+- `--llm-safe` is intended for bounded-edit sharing. It fails closed when fallback/raw passthrough preserved statements remain, or when higher-risk identifier surfaces such as local variables, custom schema qualifiers, catalog qualifiers, or user-defined function names are still visible in the obfuscated SQL.
+- `reports/privacy_summary.json` is the dedicated privacy-surface report. It records which identifier classes are still visible after obfuscation and distinguishes hard LLM-safe blockers from advisory warnings.
+- `reports/llm_workflow_report.json` summarizes total statements, fully transformed statements, fallback-preserved statements, privacy blocker/warning counts, redaction counts, and later unresolved/ambiguous/low-confidence de-obfuscation counts.
 - `context.json` now stores stable `statement_anchors`, and generated `llm_instructions.md` exposes those IDs for constrained edit workflows.
 - Phase 3 workspaces also store exact per-statement obfuscated SQL in `statement_anchors`, which powers the `apply-llm-edits` workflow.
 
@@ -187,6 +188,8 @@ script.obf/
     |-- coverage_report.txt             # after deobfuscate/roundtrip
     |-- llm_workflow_report.schema.json # after obfuscate/roundtrip
     |-- llm_workflow_report.json        # after obfuscate/roundtrip
+    |-- privacy_summary.schema.json     # after obfuscate/roundtrip
+    |-- privacy_summary.json            # after obfuscate/roundtrip
     |-- llm_edit_application_report.schema.json # after apply-llm-edits
     |-- llm_edit_application_report.json        # after apply-llm-edits
     |-- roundtrip_report.json           # after roundtrip
@@ -235,7 +238,7 @@ Options:
 - `--redaction-sensitive-columns <csv>`: required when policy is `sensitive`
 - `--stdout-only`: print obfuscated SQL to stdout without writing sibling output file
 - `--output-dir <dir>`: write obfuscated output file into a specific directory (file input only)
-- `--llm-safe` / `--no-llm-safe`: fail closed when parser compatibility fallback/raw passthrough preserves statements that are unsafe for external LLM sharing
+- `--llm-safe` / `--no-llm-safe`: fail closed when parser compatibility fallback/raw passthrough preserves statements, or when higher-risk visible identifier classes remain in the obfuscated SQL during external LLM sharing
 
 Output:
 
@@ -243,7 +246,8 @@ Output:
 - Writes sibling output file `<input_stem>_obfuscated<ext>` (file input only, unless `--stdout-only` is used)
 - Writes workspace artifacts
 - Writes `reports/llm_workflow_report.json` with obfuscation safety summary and later de-obfuscation safety counts
-- Warns when parser compatibility fallback/raw passthrough preserved statements are present; `--llm-safe` turns that warning into an error
+- Writes `reports/privacy_summary.json` with visible identifier-class findings such as local variables, schema qualifiers, catalog qualifiers, and user-defined function names
+- Warns when visible privacy surfaces remain; `--llm-safe` turns hard privacy blockers into errors
 - If input is `-` (stdin), no sibling output file is written; workspace default is `stdin.obf`
 
 ### `apply-llm-edits`
@@ -352,7 +356,7 @@ Prints:
 - dialect/seed/pretty
 - batch/statement/mapping counts
 - integrity algorithm and tracked-file count
-- artifact/report presence flags
+- artifact/report presence flags, including privacy summary state
 
 ### `translate`
 
@@ -510,7 +514,7 @@ Note: this does not replace workspace/sibling file output; those are still writt
 python obfuscator.py obfuscate script.sql --llm-safe --redaction-mode irreversible --redact-literals --strip-comments
 ```
 
-If this fails with an LLM-safe validation error, inspect `script.obf/reports/llm_workflow_report.json`. That means one or more statements were preserved through parser compatibility fallback/raw passthrough and the script was not approved for external LLM sharing in bounded-edit mode.
+If this fails with an LLM-safe validation error, inspect `script.obf/reports/privacy_summary.json` and `script.obf/reports/llm_workflow_report.json`. That means one or more fallback-preserved statements or still-visible higher-risk identifier classes were found, so the script was not approved for external LLM sharing in bounded-edit mode.
 
 2. Provide the LLM with:
 
@@ -585,13 +589,14 @@ Symptoms:
 
 Meaning:
 
-- One or more statements were preserved through parser compatibility fallback/raw passthrough instead of being fully transformed by the AST obfuscation pipeline.
+- One or more fallback-preserved statements or still-visible higher-risk identifier classes were found in the obfuscated SQL. Examples include local variables, custom schema qualifiers, catalog qualifiers, or user-defined function names.
 
 Actions:
 
-1. Inspect `reports/llm_workflow_report.json` and confirm `fallback_preserved_statement_count`.
-2. Treat the script as expert-mode only unless you can remove or isolate the fallback-preserved statements.
-3. Add redaction and re-run with `--llm-safe` before sending the script to an external LLM.
+1. Inspect `reports/privacy_summary.json` first, then `reports/llm_workflow_report.json`.
+2. Confirm whether the blocker is fallback/raw passthrough, local variables, custom schema qualifiers, catalog qualifiers, or user-defined function names.
+3. Treat the script as expert-mode only unless you can remove, isolate, or manually review those visible surfaces.
+4. Add redaction and re-run with `--llm-safe` before sending the script to an external LLM.
 
 ### Unknown Identifiers
 

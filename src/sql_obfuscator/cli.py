@@ -23,6 +23,7 @@ from .workspace import (
     load_context_payload,
     load_llm_workflow_report,
     load_mapping_payload,
+    load_privacy_summary_report,
     load_redaction_payload,
     save_deobfuscation_artifacts,
     save_llm_edit_application_report,
@@ -500,6 +501,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     llm_workflow_report = _build_llm_workflow_report(
         obfuscation_summary=result.obfuscation_report or {},
         llm_safe_requested=bool(args.llm_safe),
+        privacy_summary=result.privacy_summary,
     )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
@@ -513,6 +515,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         llm_instructions_text=llm_instructions_text,
         redaction_payload=result.redaction_payload,
         llm_workflow_report_payload=llm_workflow_report,
+        privacy_summary_payload=result.privacy_summary,
     )
     load_mapping_payload(workspace_path / "mapping.json")
     load_context_payload(workspace_path / "context.json")
@@ -520,6 +523,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     _enforce_or_warn_llm_safety(
         obfuscation_summary=result.obfuscation_report or {},
         llm_safe_requested=bool(args.llm_safe),
+        privacy_summary=result.privacy_summary,
     )
 
     output_path = _resolve_output_path_for_input(
@@ -600,19 +604,44 @@ def _build_deobfuscation_summary(report: dict) -> dict:
     }
 
 
+def _build_llm_safe_findings(*, obfuscation_summary: dict, privacy_summary: dict | None) -> tuple[list[str], list[str]]:
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if isinstance(privacy_summary, dict):
+        blockers = [item for item in privacy_summary.get("blockers", []) if isinstance(item, str)]
+        warnings = [item for item in privacy_summary.get("warnings", []) if isinstance(item, str)]
+    if not blockers and obfuscation_summary.get("fallback_preserved_statement_count", 0) > 0:
+        fallback_preserved = int(obfuscation_summary.get("fallback_preserved_statement_count", 0))
+        noun = "statement" if fallback_preserved == 1 else "statements"
+        verb = "was" if fallback_preserved == 1 else "were"
+        blockers.append(
+            f"{fallback_preserved} {noun} {verb} preserved via parser compatibility fallback/raw passthrough and may still expose identifiers or literals."
+        )
+    return blockers, warnings
+
+
+def _summarize_llm_safe_findings(findings: list[str]) -> str:
+    if not findings:
+        return ""
+    if len(findings) == 1:
+        return findings[0]
+    if len(findings) == 2:
+        return f"{findings[0]} {findings[1]}"
+    return f"{findings[0]} {findings[1]} ({len(findings) - 2} more finding(s) in reports/privacy_summary.json)."
+
+
 def _build_llm_workflow_report(
     *,
     obfuscation_summary: dict,
     llm_safe_requested: bool,
+    privacy_summary: dict | None = None,
     deobfuscation_report: dict | None = None,
 ) -> dict:
     recommendations: list[str] = []
-    fallback_preserved = obfuscation_summary.get("fallback_preserved_statement_count", 0)
-    if fallback_preserved > 0:
-        recommendations.append(
-            "Some statements were preserved via parser compatibility fallback/raw passthrough. "
-            "Review carefully before sharing with an external LLM."
-        )
+    if isinstance(privacy_summary, dict):
+        for recommendation in privacy_summary.get("recommendations", []):
+            if isinstance(recommendation, str) and recommendation not in recommendations:
+                recommendations.append(recommendation)
     if isinstance(deobfuscation_report, dict):
         for recommendation in deobfuscation_report.get("recommendations", []):
             if isinstance(recommendation, str) and recommendation not in recommendations:
@@ -620,7 +649,7 @@ def _build_llm_workflow_report(
     return {
         "schema_version": 1,
         "llm_safe_requested": llm_safe_requested,
-        "llm_safe_approved": bool(obfuscation_summary.get("llm_safe_approved", fallback_preserved == 0)),
+        "llm_safe_approved": bool(obfuscation_summary.get("llm_safe_approved", not bool(recommendations))),
         "obfuscation_summary": obfuscation_summary,
         "deobfuscation_summary": (
             _build_deobfuscation_summary(deobfuscation_report)
@@ -636,35 +665,47 @@ def _update_llm_workflow_report_with_deobfuscation(*, workspace_path: Path, repo
     if not report_path.exists():
         return
     existing_report = load_llm_workflow_report(report_path)
+    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
+    privacy_summary = (
+        load_privacy_summary_report(privacy_summary_path)
+        if privacy_summary_path.exists()
+        else None
+    )
     save_llm_workflow_report(
         workspace_path=workspace_path,
         report_payload=_build_llm_workflow_report(
             obfuscation_summary=existing_report.get("obfuscation_summary", {}),
             llm_safe_requested=bool(existing_report.get("llm_safe_requested", False)),
+            privacy_summary=privacy_summary,
             deobfuscation_report=report,
         ),
     )
 
 
-def _enforce_or_warn_llm_safety(*, obfuscation_summary: dict, llm_safe_requested: bool) -> None:
-    fallback_preserved = obfuscation_summary.get("fallback_preserved_statement_count", 0)
-    if fallback_preserved <= 0:
-        return
-    noun = "statement" if fallback_preserved == 1 else "statements"
-    verb = "was" if fallback_preserved == 1 else "were"
-    detail = (
-        f"{fallback_preserved} {noun} {verb} preserved via parser compatibility fallback/raw passthrough "
-        "and may still expose identifiers or literals."
+def _enforce_or_warn_llm_safety(
+    *,
+    obfuscation_summary: dict,
+    llm_safe_requested: bool,
+    privacy_summary: dict | None = None,
+) -> None:
+    blockers, warnings = _build_llm_safe_findings(
+        obfuscation_summary=obfuscation_summary,
+        privacy_summary=privacy_summary,
     )
-    if llm_safe_requested:
+    findings = [*blockers, *warnings]
+    if not findings:
+        return
+    detail = _summarize_llm_safe_findings(findings)
+    if llm_safe_requested and blockers:
         raise WorkspaceError(
             "LLM-safe validation failed: "
-            f"{detail} Review reports/llm_workflow_report.json or rerun without --llm-safe for expert mode."
+            f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
+            "or rerun without --llm-safe for expert mode."
         )
     print(
         "Warning: "
-        f"{detail} Review reports/llm_workflow_report.json before sharing with an external LLM. "
-        "Use --llm-safe to fail closed.",
+        f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
+        "before sharing with an external LLM. Use --llm-safe to fail closed.",
         file=sys.stderr,
     )
 
@@ -821,6 +862,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     llm_workflow_report = _build_llm_workflow_report(
         obfuscation_summary=obfuscation.obfuscation_report or {},
         llm_safe_requested=bool(args.llm_safe),
+        privacy_summary=obfuscation.privacy_summary,
     )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
@@ -834,6 +876,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         llm_instructions_text=llm_instructions_text,
         redaction_payload=obfuscation.redaction_payload,
         llm_workflow_report_payload=llm_workflow_report,
+        privacy_summary_payload=obfuscation.privacy_summary,
     )
     mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
     context_payload = load_context_payload(workspace_path / "context.json")
@@ -841,6 +884,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     _enforce_or_warn_llm_safety(
         obfuscation_summary=obfuscation.obfuscation_report or {},
         llm_safe_requested=bool(args.llm_safe),
+        privacy_summary=obfuscation.privacy_summary,
     )
 
     output_path = _resolve_output_path_for_input(
@@ -953,6 +997,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     coverage_report_path = reports_path / "coverage_report.txt"
     llm_workflow_report_path = reports_path / "llm_workflow_report.json"
     llm_edit_application_report_path = reports_path / "llm_edit_application_report.json"
+    privacy_summary_path = reports_path / "privacy_summary.json"
     roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
     original_pretty_path = reports_path / "original_pretty.sql"
     deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
@@ -965,6 +1010,11 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     mapping_payload = load_mapping_payload(mapping_path)
     context_payload = load_context_payload(context_path)
     integrity_payload = validate_workspace_integrity(workspace_path)
+    privacy_summary = (
+        load_privacy_summary_report(privacy_summary_path)
+        if privacy_summary_path.exists()
+        else None
+    )
 
     lines = [
         f"workspace: {workspace_path}",
@@ -988,6 +1038,9 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
         f"reports/llm_workflow_report.json: {'yes' if llm_workflow_report_path.exists() else 'no'}",
         f"reports/llm_edit_application_report.json: {'yes' if llm_edit_application_report_path.exists() else 'no'}",
+        f"reports/privacy_summary.json: {'yes' if privacy_summary_path.exists() else 'no'}",
+        f"privacy llm-safe blocked: {privacy_summary.get('llm_safe_blocked') if isinstance(privacy_summary, dict) else 'n/a'}",
+        f"privacy review recommended: {privacy_summary.get('manual_review_recommended') if isinstance(privacy_summary, dict) else 'n/a'}",
         f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
         f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
         f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",

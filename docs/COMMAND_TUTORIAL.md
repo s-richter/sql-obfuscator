@@ -32,7 +32,7 @@ Note on examples:
 - `statement anchor`: stable per-statement metadata attached to one statement in the obfuscated script. It gives that statement an ID such as `stmt_0001` and helps the tool match edits/restores back to the right place.
 - `statement replacement`: a structured JSON edit that says "replace statement X with this SQL" instead of asking the LLM to rewrite the whole file.
 - `bounded external LLM sharing`: the conservative workflow used when obfuscated SQL will be sent to an LLM outside your immediate trust boundary, such as a hosted API. `bounded` means the model is expected to make small, local edits while keeping obfuscated identifiers, placeholders, and overall structure stable.
-- `fail closed`: stop with an error instead of continuing when a safety condition is not met. In this tool, `--llm-safe` uses fail-closed behavior.
+- `fail closed`: stop with an error instead of continuing when a safety condition is not met. In this tool, `--llm-safe` uses fail-closed behavior when higher-risk privacy findings or fallback-preserved statements are detected.
 - `expert mode`: the less-constrained workflow where you intentionally allow larger rewrites or manual full-script edits and accept that more review may be needed afterward.
 - `unresolved`: the tool could not confidently map an obfuscated identifier/placeholder back to an original value.
 - `ambiguous`: multiple possible restore targets exist, so the tool cannot safely choose one.
@@ -212,6 +212,7 @@ Plain-language note:
 
 - `Fails closed` means the command stops with an error instead of continuing and producing a workspace that might be mistaken for safe-to-share output.
 - `Bounded external LLM sharing` means a cautious workflow for sending obfuscated SQL to an outside LLM while expecting edit-sized changes, not a full rewrite of the script.
+- `--llm-safe` now checks more than raw fallback statements. It also looks for higher-risk identifier classes that intentionally remain visible after obfuscation, such as local variables, custom schema qualifiers, catalog qualifiers, and user-defined function names.
 
 Command:
 
@@ -225,7 +226,7 @@ python obfuscator.py obfuscate sample.sql \
 
 Command options used:
 
-- `--llm-safe`: reject workspaces that still contain fallback/raw-passthrough statements not approved for bounded external LLM sharing.
+- `--llm-safe`: reject workspaces that still contain fallback/raw-passthrough statements or higher-risk visible identifier classes not approved for bounded external LLM sharing.
 - `--redaction-mode irreversible`: privacy-first sanitization, no literal restoration.
 - `--redact-literals`: redact literal values.
 - `--strip-comments`: remove comments from output.
@@ -234,6 +235,7 @@ Expected result:
 
 - Obfuscated SQL has no original comments/literals.
 - Workspace includes `reports/llm_workflow_report.json` with LLM-sharing safety diagnostics.
+- Workspace includes `reports/privacy_summary.json`, which is the dedicated report for still-visible identifier classes in the obfuscated SQL.
 - `deobfuscate` restores identifiers only; literal values remain sanitized.
 
 Example expected SQL output (`sample_obfuscated.sql`):
@@ -286,7 +288,7 @@ python obfuscator.py deobfuscate \
 
 Command options used:
 
-- `--llm-safe`: recommended when the obfuscated SQL will be shared with an external LLM.
+- `--llm-safe`: recommended when the obfuscated SQL will be shared with an external LLM. It now checks both fallback-preserved statements and higher-risk visible identifier classes.
 - `--redaction-mode reversible`: enable reversible literal placeholders.
 - `--redact-literals`: apply literal redaction pass.
 
@@ -608,6 +610,7 @@ LIMIT 10
 What this does:
 
 - Displays workspace metadata and artifact presence.
+- Shows whether the dedicated privacy summary report exists and whether it marked the workspace as blocked or review-required for LLM-safe sharing.
 - Validates integrity tracking before reporting status.
 
 Command:
@@ -623,7 +626,8 @@ Command options used:
 Expected result:
 
 - Prints dialect/seed/statement stats, statement-anchor count, and artifact/report availability.
-- Shows whether reports such as `llm_workflow_report.json` and `llm_edit_application_report.json` are present.
+- Shows whether reports such as `llm_workflow_report.json`, `privacy_summary.json`, and `llm_edit_application_report.json` are present.
+- Includes the privacy summary flags for `llm-safe blocked` and `review recommended` when that report exists.
 - Confirms integrity state for tracked files.
 
 Example expected SQL output:
@@ -832,6 +836,9 @@ Common failure patterns and actions:
 - `apply-llm-edits` fails:
   - Cause: unknown `statement_id`, duplicate `statement_id`, multi-statement replacement SQL, parse error in replacement SQL, or a stale workspace that does not contain exact statement-anchor SQL.
   - Action: inspect `llm_instructions.md`, confirm the LLM returned the preferred `statement_replacements` JSON format, make sure each `sql` value is exactly one obfuscated SQL statement, then re-run `obfuscate` if the workspace was produced by an older version.
+- `obfuscate --llm-safe` fails:
+  - Cause: fallback-preserved raw statements or higher-risk visible identifier classes were found in the obfuscated SQL. Common examples are local variables, custom schema qualifiers, catalog qualifiers, and user-defined function names.
+  - Action: inspect `reports/privacy_summary.json` first, then `reports/llm_workflow_report.json`, and decide whether to reduce those visible surfaces or move the script to expert-mode review.
 - `deobfuscate` or `validate-before-write` fails:
   - Cause: unresolved/ambiguous/low-confidence mappings, missing placeholders, or integrity issues.
   - Action: run `workspace-info`, then run `deobfuscate --dry-run` to inspect summary counts before deciding on override flags.

@@ -9,6 +9,7 @@ from sqlglot.errors import ParseError
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError
+from .privacy import build_privacy_summary
 from .redaction import apply_redaction
 from .registry import IdentifierRegistry
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
@@ -133,6 +134,7 @@ class ObfuscationResult:
     context_payload: dict
     redaction_payload: dict | None = None
     obfuscation_report: dict[str, Any] | None = None
+    privacy_summary: dict[str, Any] | None = None
 
 
 def obfuscate_sql(
@@ -232,6 +234,19 @@ def obfuscate_sql_with_metadata(
         "statement_anchors": statement_anchors,
     }
     fully_transformed_statement_count = max(0, total_statements - fallback_preserved_statement_count)
+    privacy_summary = build_privacy_summary(
+        sql_text=output_sql,
+        dialect=dialect,
+        statement_count=total_statements,
+        fallback_preserved_statement_count=fallback_preserved_statement_count,
+    )
+    identifier_surface = privacy_summary.get("identifier_surface", {})
+    local_variables = identifier_surface.get("local_variables", {})
+    system_variables = identifier_surface.get("system_variables", {})
+    user_defined_functions = identifier_surface.get("user_defined_functions", {})
+    custom_schema_qualifiers = identifier_surface.get("custom_schema_qualifiers", {})
+    common_schema_qualifiers = identifier_surface.get("common_schema_qualifiers", {})
+    catalog_qualifiers = identifier_surface.get("catalog_qualifiers", {})
     obfuscation_report = {
         "schema_version": 1,
         "batch_count": len(batches),
@@ -239,7 +254,16 @@ def obfuscate_sql_with_metadata(
         "statement_anchor_count": len(statement_anchors),
         "fully_transformed_statement_count": fully_transformed_statement_count,
         "fallback_preserved_statement_count": fallback_preserved_statement_count,
-        "llm_safe_approved": fallback_preserved_statement_count == 0,
+        "llm_safe_approved": not bool(privacy_summary.get("llm_safe_blocked", False)),
+        "privacy_review_required": bool(privacy_summary.get("manual_review_recommended", False)),
+        "privacy_blocker_count": len(privacy_summary.get("blockers", [])),
+        "privacy_warning_count": len(privacy_summary.get("warnings", [])),
+        "visible_local_variable_count": local_variables.get("occurrence_count", 0),
+        "visible_system_variable_count": system_variables.get("occurrence_count", 0),
+        "visible_user_defined_function_count": user_defined_functions.get("occurrence_count", 0),
+        "visible_custom_schema_qualifier_count": custom_schema_qualifiers.get("occurrence_count", 0),
+        "visible_common_schema_qualifier_count": common_schema_qualifiers.get("occurrence_count", 0),
+        "visible_catalog_qualifier_count": catalog_qualifiers.get("occurrence_count", 0),
         "redaction_mode": redaction_mode,
         **redaction_result.summary,
     }
@@ -249,4 +273,5 @@ def obfuscate_sql_with_metadata(
         context_payload=context_payload,
         redaction_payload=redaction_result.redaction_payload,
         obfuscation_report=obfuscation_report,
+        privacy_summary=privacy_summary,
     )
