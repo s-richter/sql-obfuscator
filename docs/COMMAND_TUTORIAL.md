@@ -29,6 +29,8 @@ Note on examples:
 - `integrity tracking`: checksum validation that detects changed/tampered workspace artifacts.
 - `placeholder`: a temporary token used in reversible literal redaction so original literal values can be restored.
 - `dialect`: SQL flavor (`tsql`, `hive`) used for parsing and output generation.
+- `statement anchor`: stable per-statement metadata with IDs such as `stmt_0001`, used for bounded LLM edits and restore matching.
+- `statement replacement`: a structured JSON edit that replaces one known statement by `statement_id` while leaving untouched statements unchanged.
 - `unresolved`: the tool could not confidently map an obfuscated identifier/placeholder back to an original value.
 - `ambiguous`: multiple possible restore targets exist, so the tool cannot safely choose one.
 - `low-confidence`: a best match was found, but with reduced confidence due to structural edits.
@@ -41,6 +43,7 @@ Note on examples:
 - Keep outputs isolated by run: [3) Custom workspace path](#s3)
 - Share safely with LLM (no restoration needed): [4) Irreversible redaction](#s4)
 - Share with LLM and restore literals later: [5) Reversible redaction + restore](#s5)
+- Preferred bounded LLM edit application: [5a) `apply-llm-edits`](#s5a)
 - Validate edited SQL without writing output: [6) Safety check with `deobfuscate --dry-run`](#s6)
 - Validate first, write only on pass: [7) `validate-before-write`](#s7)
 - Quick quality check in one command: [8) `roundtrip`](#s8)
@@ -200,11 +203,13 @@ What this does:
 - Obfuscates identifiers.
 - Strips comments.
 - Redacts literals for LLM sharing, without storing restore mapping data.
+- Fails closed when parser fallback/raw passthrough leaves statements that are not approved for bounded external LLM sharing.
 
 Command:
 
 ```bash
 python obfuscator.py obfuscate sample.sql \
+  --llm-safe \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments
@@ -212,6 +217,7 @@ python obfuscator.py obfuscate sample.sql \
 
 Command options used:
 
+- `--llm-safe`: reject workspaces that still contain fallback/raw-passthrough statements not approved for bounded external LLM sharing.
 - `--redaction-mode irreversible`: privacy-first sanitization, no literal restoration.
 - `--redact-literals`: redact literal values.
 - `--strip-comments`: remove comments from output.
@@ -219,6 +225,7 @@ Command options used:
 Expected result:
 
 - Obfuscated SQL has no original comments/literals.
+- Workspace includes `reports/llm_workflow_report.json` with LLM-sharing safety diagnostics.
 - `deobfuscate` restores identifiers only; literal values remain sanitized.
 
 Example expected SQL output (`sample_obfuscated.sql`):
@@ -236,7 +243,7 @@ WHERE
 
 ## 5) Reversible redaction and literal restoration
 
-In this example, the original SQL script (SQL input) is first obfuscated, and then de-obfuscated. This can be used to test the application or, as shown in later examples, used to give the obfuscated SQL to an LLM, let the LLM edit the SQL, and then de-obfuscate the edited SQL. The result has the same column names/table names/aliases/etc. as the original script.
+In this example, the original SQL script (SQL input) is first obfuscated, and then de-obfuscated. This can be used to test the application or, in the recommended LLM workflow, to give the obfuscated SQL to an LLM, let the LLM return structured statement replacements, apply those replacements with `apply-llm-edits`, and then de-obfuscate the resulting script. The result has the same column names/table names/aliases/etc. as the original script.
 
 SQL input:
 
@@ -256,6 +263,7 @@ Command (obfuscate):
 
 ```bash
 python obfuscator.py obfuscate sample.sql \
+  --llm-safe \
   --redaction-mode reversible \
   --redact-literals
 ```
@@ -270,12 +278,14 @@ python obfuscator.py deobfuscate \
 
 Command options used:
 
+- `--llm-safe`: recommended when the obfuscated SQL will be shared with an external LLM.
 - `--redaction-mode reversible`: enable reversible literal placeholders.
 - `--redact-literals`: apply literal redaction pass.
 
 Expected result:
 
 - Workspace includes `redaction.json` and `redaction.schema.json`.
+- Workspace includes `llm_instructions.md` with statement IDs and the preferred `statement_replacements` JSON format.
 - If placeholders survive the LLM edit, literals are restored in final de-obfuscated SQL.
 - If placeholders are broken, safety checks fail unless explicitly overridden.
 
@@ -288,6 +298,60 @@ FROM payments
 WHERE
   card_last4 = '1234' AND amount > 250.00
 ```
+
+<a id="s5a"></a>
+
+## 5a) Preferred bounded-edit application with `apply-llm-edits`
+
+LLM input/output in the recommended workflow:
+
+- Give the LLM `sample.obf/obfuscated.sql` and `sample.obf/llm_instructions.md`.
+- Ask it to return JSON `statement_replacements` instead of a full rewritten script.
+- Each edit targets one known `statement_id` and must contain exactly one replacement SQL statement that still uses the obfuscated identifiers from the workspace.
+
+Example `sample.obf/llm_edits.json`:
+
+```json
+{
+  "schema_version": 1,
+  "format": "statement_replacements",
+  "edits": [
+    {
+      "statement_id": "stmt_0002",
+      "sql": "SELECT [spruce_hyena] FROM dbo.sleepy_gerbil WHERE 1 = 1 AND [spruce_hyena] > 10"
+    }
+  ]
+}
+```
+
+What this does:
+
+- Validates that each edit references a known `statement_id`.
+- Validates that each `sql` value contains exactly one statement.
+- Rebuilds `llm_response_obfuscated.sql` while preserving untouched statements exactly from `obfuscated.sql`.
+- Writes an edit-application report you can inspect before restore.
+
+Command:
+
+```bash
+python obfuscator.py apply-llm-edits \
+  --workspace sample.obf \
+  --edits sample.obf/llm_edits.json
+```
+
+Command options used:
+
+- `--workspace sample.obf`: workspace containing `obfuscated.sql`, `context.json`, and statement anchors.
+- `--edits sample.obf/llm_edits.json`: JSON edits returned by the LLM, either raw JSON or a fenced `json` code block.
+- `--out <path>`: optional output path for the rebuilt obfuscated SQL.
+- `--dry-run`: validate the edit payload and print a summary without writing files.
+
+Expected result:
+
+- `sample.obf/llm_response_obfuscated.sql` is written by default.
+- `sample.obf/reports/llm_edit_application_report.json` is written after a non-dry-run apply.
+- Untouched statements remain byte-for-byte identical to the original `obfuscated.sql`.
+- The command fails fast for unknown `statement_id` values, duplicate edits, stale workspaces without anchor SQL, parse errors, or multi-statement replacements.
 
 ### Optional selective redaction policies
 
@@ -325,7 +389,7 @@ WHERE
 
 ## 6) Safety check with `deobfuscate --dry-run`
 
-SQL input (LLM-edited obfuscated SQL):
+SQL input (usually produced by `apply-llm-edits` in the recommended workflow):
 
 ```sql
 SELECT t1.c1
@@ -336,6 +400,7 @@ WHERE t1.c2 = 'changed_by_llm';
 What this does:
 
 - Runs mapping resolution (matching obfuscated names back to originals) and redaction placeholder checks.
+- Reuses the same de-obfuscation safety logic that `validate-before-write` uses later.
 - Prints diagnostics only; does not write de-obfuscated output.
 
 Command:
@@ -366,7 +431,7 @@ Example expected SQL output:
 
 ## 7) `validate-before-write`
 
-SQL input (LLM-edited obfuscated SQL):
+SQL input (usually produced by `apply-llm-edits` in the recommended workflow):
 
 ```sql
 SELECT t1.c1
@@ -377,6 +442,7 @@ WHERE t1.c2 = 'value';
 What this does:
 
 - Validation-first path: runs checks, writes output only when safety checks pass.
+- Gives you the safest single-command finalization step after a clean edit-application pass.
 
 Command:
 
@@ -393,6 +459,7 @@ Command options used:
 Expected result:
 
 - Writes `deobfuscated.sql` only if no unresolved mappings/placeholders and no low-confidence violations (unless explicit overrides are passed).
+- Works especially well after `apply-llm-edits`, because untouched obfuscated statements are preserved exactly.
 
 Example expected SQL output (`deobfuscated.sql`):
 
@@ -519,7 +586,8 @@ Command options used:
 
 Expected result:
 
-- Prints dialect/seed/statement stats and artifact/report availability.
+- Prints dialect/seed/statement stats, statement-anchor count, and artifact/report availability.
+- Shows whether reports such as `llm_workflow_report.json` and `llm_edit_application_report.json` are present.
 - Confirms integrity state for tracked files.
 
 Example expected SQL output:
@@ -725,6 +793,9 @@ Exit code guide:
 
 Common failure patterns and actions:
 
+- `apply-llm-edits` fails:
+  - Cause: unknown `statement_id`, duplicate `statement_id`, multi-statement replacement SQL, parse error in replacement SQL, or a stale workspace that does not contain exact statement-anchor SQL.
+  - Action: inspect `llm_instructions.md`, confirm the LLM returned the preferred `statement_replacements` JSON format, make sure each `sql` value is exactly one obfuscated SQL statement, then re-run `obfuscate` if the workspace was produced by an older version.
 - `deobfuscate` or `validate-before-write` fails:
   - Cause: unresolved/ambiguous/low-confidence mappings, missing placeholders, or integrity issues.
   - Action: run `workspace-info`, then run `deobfuscate --dry-run` to inspect summary counts before deciding on override flags.
@@ -740,8 +811,10 @@ Common failure patterns and actions:
 
 ## Common safe workflow (recommended)
 
-1. Obfuscate with desired redaction policy.
-2. Send obfuscated SQL to LLM.
-3. Run `deobfuscate --dry-run` first.
-4. Run `validate-before-write` for validation-first output generation.
-5. Use override flags only with explicit human review.
+1. Obfuscate with the desired redaction policy and `--llm-safe` when the output will be shared externally.
+2. Give the LLM `obfuscated.sql` and `llm_instructions.md`.
+3. Save the LLM response as `llm_edits.json` in the preferred `statement_replacements` JSON format.
+4. Run `apply-llm-edits` to build `llm_response_obfuscated.sql` while preserving untouched statements exactly.
+5. Run `deobfuscate --dry-run` first.
+6. Run `validate-before-write` for validation-first output generation.
+7. Use override flags only with explicit human review.
