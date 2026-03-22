@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import WorkspaceError
+from .llm_edits import llm_edits_example_json
 
 
 MAPPING_SCHEMA_VERSION = 1
@@ -90,6 +91,20 @@ LLM_WORKFLOW_REPORT_JSON_SCHEMA: dict[str, Any] = {
         "llm_safe_approved",
         "obfuscation_summary",
         "deobfuscation_summary",
+    ],
+}
+
+LLM_EDIT_APPLICATION_REPORT_JSON_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SQL LLM Edit Application Report Schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "format",
+        "applied_edit_count",
+        "untouched_statement_count",
+        "statement_count",
+        "targeted_statement_ids",
     ],
 }
 
@@ -320,6 +335,24 @@ def save_llm_workflow_report(
     _write_json(reports_path / "llm_workflow_report.json", report_payload)
 
 
+def save_llm_edit_application_report(
+    *,
+    workspace_path: Path,
+    report_payload: dict[str, Any],
+) -> None:
+    reports_path = workspace_path / "reports"
+    try:
+        reports_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
+
+    _write_json(
+        reports_path / "llm_edit_application_report.schema.json",
+        LLM_EDIT_APPLICATION_REPORT_JSON_SCHEMA,
+    )
+    _write_json(reports_path / "llm_edit_application_report.json", report_payload)
+
+
 def _write_text(path: Path, content: str) -> None:
     try:
         path.write_text(content, encoding="utf-8")
@@ -544,6 +577,11 @@ def _validate_context_payload(payload: dict[str, Any], *, source: Path) -> None:
                     raise WorkspaceError(
                         f"context.json has invalid statement anchor field '{field}' at index {idx} in {source}"
                     )
+            obfuscated_sql = anchor.get("obfuscated_sql")
+            if obfuscated_sql is not None and not isinstance(obfuscated_sql, str):
+                raise WorkspaceError(
+                    f"context.json has invalid statement anchor field 'obfuscated_sql' at index {idx} in {source}"
+                )
 
 
 def _validate_integrity_payload(payload: dict[str, Any], *, source: Path) -> None:
@@ -643,6 +681,27 @@ def _statement_anchor_instruction_lines(statement_anchors: list[dict[str, Any]] 
     return "\n".join(lines) + "\n\n"
 
 
+def _statement_replacement_instruction_lines(statement_anchors: list[dict[str, Any]] | None) -> str:
+    example_statement_id = "stmt_0001"
+    for anchor in statement_anchors or []:
+        statement_id = anchor.get("statement_id")
+        if isinstance(statement_id, str) and statement_id:
+            example_statement_id = statement_id
+            break
+    example_json = llm_edits_example_json(statement_id=example_statement_id)
+    return (
+        "## Preferred Response Format\n"
+        "For production and bounded-edit workflows, return JSON statement replacements instead of a full rewritten script.\n\n"
+        "```json\n"
+        f"{example_json}\n"
+        "```\n\n"
+        "- Include only changed statements in `edits`.\n"
+        "- Each `sql` value must contain exactly one replacement statement.\n"
+        "- Omit untouched statements so `apply-llm-edits` can preserve them exactly.\n"
+        "- Raw JSON or a fenced ```json``` block are both accepted.\n\n"
+    )
+
+
 def _default_llm_instructions(
     *,
     input_path: Path,
@@ -656,6 +715,7 @@ def _default_llm_instructions(
         f"- Original input file: `{input_path.name}`\n"
         f"- SQL dialect: `{dialect}`\n\n"
         + _statement_anchor_instruction_lines(statement_anchors)
+        + _statement_replacement_instruction_lines(statement_anchors)
         + "## Workflow Modes\n"
         "- Recommended mode: bounded edit. Preserve obfuscated identifiers and overall statement structure.\n"
         "- Expert mode: larger rewrites are allowed only when explicitly required and can trigger unresolved, ambiguous, or low-confidence restore results.\n\n"

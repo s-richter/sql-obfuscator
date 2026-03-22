@@ -95,17 +95,17 @@ def _process_batch(
     for local_statement_index, statement in enumerate(transformed, start=1):
         statement_sql = emit_sql(statement, dialect=dialect, pretty=pretty)
         statement_sqls.append(statement_sql)
-        statement_anchors.append(
-            anchor_to_payload(
-                build_statement_anchor(
-                    statement,
-                    dialect=dialect,
-                    batch_index=batch_number,
-                    statement_index=local_statement_index,
-                    global_statement_index=statement_start_index + local_statement_index - 1,
-                )
+        anchor_payload = anchor_to_payload(
+            build_statement_anchor(
+                statement,
+                dialect=dialect,
+                batch_index=batch_number,
+                statement_index=local_statement_index,
+                global_statement_index=statement_start_index + local_statement_index - 1,
             )
         )
+        anchor_payload["obfuscated_sql"] = statement_sql
+        statement_anchors.append(anchor_payload)
     return _ProcessedBatch(
         output_sql=join_emitted_statements(statement_sqls),
         statement_count=len(statements),

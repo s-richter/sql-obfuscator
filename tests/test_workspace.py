@@ -70,6 +70,7 @@ def test_load_context_payload_accepts_statement_anchors(tmp_path: Path):
                         "placeholder_tokens": [],
                         "fallback_preserved": False,
                         "preview": "SELECT x",
+                        "obfuscated_sql": "SELECT x",
                     }
                 ],
             }

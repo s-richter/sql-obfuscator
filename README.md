@@ -96,6 +96,7 @@ python obfuscator.py workspace-info --workspace script.obf
 - `obfuscate`: Obfuscate SQL and create workspace artifacts.
 - `deobfuscate`: Reverse obfuscation using workspace mapping/context.
 - `validate-before-write`: Validate de-obfuscation safety and write output only when checks pass.
+- `apply-llm-edits`: Apply structured statement replacements to obfuscated SQL while preserving untouched statements exactly.
 - `roundtrip`: Obfuscate and immediately de-obfuscate for verification.
 - `translate`: Translate SQL between supported dialects with optional validation/reporting.
 - `workspace-info`: Show workspace artifact/report status and integrity info.
@@ -158,6 +159,7 @@ Safety note:
 - `--llm-safe` is intended for bounded-edit sharing. It fails closed when any statement was preserved through parser compatibility fallback/raw passthrough instead of going through the normal AST obfuscation path.
 - `reports/llm_workflow_report.json` summarizes total statements, fully transformed statements, fallback-preserved statements, redaction counts, and later unresolved/ambiguous/low-confidence de-obfuscation counts.
 - `context.json` now stores stable `statement_anchors`, and generated `llm_instructions.md` exposes those IDs for constrained edit workflows.
+- Phase 3 workspaces also store exact per-statement obfuscated SQL in `statement_anchors`, which powers the `apply-llm-edits` workflow.
 
 ## Workspace Model
 
@@ -169,6 +171,7 @@ Typical workspace contents:
 script.obf/
 |-- original.sql
 |-- obfuscated.sql
+|-- llm_response_obfuscated.sql           # after apply-llm-edits or manual full-script editing
 |-- deobfuscated.sql                    # after deobfuscate/roundtrip
 |-- llm_instructions.md
 |-- mapping.json
@@ -184,6 +187,8 @@ script.obf/
     |-- coverage_report.txt             # after deobfuscate/roundtrip
     |-- llm_workflow_report.schema.json # after obfuscate/roundtrip
     |-- llm_workflow_report.json        # after obfuscate/roundtrip
+    |-- llm_edit_application_report.schema.json # after apply-llm-edits
+    |-- llm_edit_application_report.json        # after apply-llm-edits
     |-- roundtrip_report.json           # after roundtrip
     |-- roundtrip_diff.txt              # after roundtrip --diff-report
     |-- original_pretty.sql             # normalized with sqlglot pretty formatting
@@ -240,6 +245,26 @@ Output:
 - Writes `reports/llm_workflow_report.json` with obfuscation safety summary and later de-obfuscation safety counts
 - Warns when parser compatibility fallback/raw passthrough preserved statements are present; `--llm-safe` turns that warning into an error
 - If input is `-` (stdin), no sibling output file is written; workspace default is `stdin.obf`
+
+### `apply-llm-edits`
+
+```bash
+python obfuscator.py apply-llm-edits --workspace <dir> --edits <llm_edits.json> [options]
+```
+
+Behavior:
+
+- Accepts raw JSON or a fenced ```json``` block using the `statement_replacements` format from `llm_instructions.md`.
+- Validates that every edit targets a known `statement_id`.
+- Validates that every replacement `sql` value contains exactly one statement.
+- Rebuilds the obfuscated script while preserving untouched statements exactly.
+- Writes `<workspace>/llm_response_obfuscated.sql` by default.
+- Writes `reports/llm_edit_application_report.json` after a non-dry-run apply.
+
+Options:
+
+- `--out <path>`: output path for the applied obfuscated SQL (default: `<workspace>/llm_response_obfuscated.sql`)
+- `--dry-run`: validate and print an apply summary without writing files
 
 ### `deobfuscate`
 
@@ -492,19 +517,25 @@ If this fails with an LLM-safe validation error, inspect `script.obf/reports/llm
 - `script.obf/obfuscated.sql`
 - `script.obf/llm_instructions.md`
 
-The default instructions distinguish recommended bounded-edit behavior from expert mode guardrails. They also list stable statement IDs such as `stmt_0001`, which gives you a safer unit of change when you need to discuss or review edits statement by statement.
+The default instructions distinguish recommended bounded-edit behavior from expert mode guardrails. They also list stable statement IDs such as `stmt_0001`, and they now include the preferred `statement_replacements` JSON format for production use.
 
 3. Save LLM output (example):
 
-- `script.obf/llm_response_obfuscated.sql`
+- `script.obf/llm_edits.json`
 
-4. Validate first:
+4. Apply the structured edits:
+
+```bash
+python obfuscator.py apply-llm-edits --workspace script.obf --edits script.obf/llm_edits.json
+```
+
+5. Validate first:
 
 ```bash
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
 ```
 
-5. If clean, de-obfuscate fully:
+6. If clean, de-obfuscate fully:
 
 ```bash
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql

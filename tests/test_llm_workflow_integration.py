@@ -269,6 +269,61 @@ def test_llm_style_edit_with_reversible_redaction_restores_literals(tmp_path: Pa
     assert report.get("redaction", {}).get("missing_placeholder_count", 0) == 0
 
 
+def test_apply_llm_edits_then_validate_before_write_deobfuscates_cleanly(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input_patch.sql"
+    sql_file.write_text(
+        """
+        SELECT UserId
+        FROM Users
+        WHERE Status = 1;
+        """,
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "input_patch.obf"
+    assert main(["obfuscate", str(sql_file), "--workspace", str(workspace), "--seed", "123", "--no-pretty"]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": anchor["statement_id"],
+                        "sql": anchor["obfuscated_sql"].replace("WHERE", "WHERE 1 = 1 AND", 1),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["apply-llm-edits", "--workspace", str(workspace), "--edits", str(edits_path)]) == 0
+    capsys.readouterr()
+
+    rc = main(
+        [
+            "validate-before-write",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(workspace / "llm_response_obfuscated.sql"),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    deobfuscated_sql = (workspace / "deobfuscated.sql").read_text(encoding="utf-8")
+    assert "Users" in deobfuscated_sql
+    assert "UserId" in deobfuscated_sql
+    assert "1 = 1" in deobfuscated_sql
+
+
+
 def test_validate_before_write_blocks_heavy_rewrite_until_explicit_override(tmp_path: Path, capsys):
     sql_file = tmp_path / "rewrite_heavy.sql"
     sql_file.write_text(

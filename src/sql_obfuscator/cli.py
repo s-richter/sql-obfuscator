@@ -13,6 +13,7 @@ from sqlglot.errors import ParseError
 from .dialects_factory import get_dialect_profile, supported_dialects
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
+from .llm_edits import apply_llm_statement_replacements, load_llm_edits_payload
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
@@ -24,6 +25,7 @@ from .workspace import (
     load_mapping_payload,
     load_redaction_payload,
     save_deobfuscation_artifacts,
+    save_llm_edit_application_report,
     save_llm_workflow_report,
     save_roundtrip_reports,
     save_translation_artifacts,
@@ -218,6 +220,30 @@ def _add_deobfuscate_args(
     )
 
 
+
+def _add_apply_llm_edits_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to workspace folder created during obfuscation",
+    )
+    parser.add_argument(
+        "--edits",
+        required=True,
+        help="Path to JSON statement-replacement edits returned by the LLM",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output path for the applied obfuscated SQL (default: <workspace>/llm_response_obfuscated.sql)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and summarize the edit payload without writing files",
+    )
+
+
 def build_command_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sql-obfuscator",
@@ -243,6 +269,12 @@ def build_command_parser() -> argparse.ArgumentParser:
         help="Validate de-obfuscation safety first, then write output if checks pass",
     )
     _add_deobfuscate_args(validate_before_write_parser, include_dry_run=False)
+
+    apply_llm_edits_parser = subparsers.add_parser(
+        "apply-llm-edits",
+        help="Apply constrained statement-replacement edits to workspace obfuscated SQL",
+    )
+    _add_apply_llm_edits_args(apply_llm_edits_parser)
 
     roundtrip_parser = subparsers.add_parser(
         "roundtrip",
@@ -637,6 +669,41 @@ def _enforce_or_warn_llm_safety(*, obfuscation_summary: dict, llm_safe_requested
     )
 
 
+
+def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    edits_path = Path(args.edits)
+    validate_workspace_integrity(workspace_path)
+    context_payload = load_context_payload(workspace_path / "context.json")
+    obfuscated_sql = _read_sql_file(workspace_path / "obfuscated.sql")
+    edits_payload = load_llm_edits_payload(edits_path)
+    applied_sql, report = apply_llm_statement_replacements(
+        obfuscated_sql=obfuscated_sql,
+        statement_anchors=context_payload.get("statement_anchors"),
+        batch_count=int(context_payload.get("batch_count", 0)),
+        dialect=str(context_payload.get("dialect", "tsql")),
+        edits_payload=edits_payload,
+        statement_count=context_payload.get("statement_count"),
+    )
+
+    print("apply-llm-edits summary:")
+    print(f"applied_edit_count: {report.get('applied_edit_count', 0)}")
+    print(f"untouched_statement_count: {report.get('untouched_statement_count', 0)}")
+    print(f"statement_count: {report.get('statement_count', 0)}")
+    print(f"targeted_statement_ids: {report.get('targeted_statement_ids', [])}")
+
+    if args.dry_run:
+        return 0
+
+    output_path = Path(args.out) if args.out else workspace_path / "llm_response_obfuscated.sql"
+    if output_path == workspace_path / "obfuscated.sql":
+        raise WorkspaceError("apply-llm-edits cannot overwrite workspace obfuscated.sql")
+    _write_output_file(output_path, applied_sql)
+    save_llm_edit_application_report(workspace_path=workspace_path, report_payload=report)
+    print(applied_sql)
+    return 0
+
+
 def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     input_path = Path(args.input)
@@ -885,6 +952,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     roundtrip_report_path = reports_path / "roundtrip_report.json"
     coverage_report_path = reports_path / "coverage_report.txt"
     llm_workflow_report_path = reports_path / "llm_workflow_report.json"
+    llm_edit_application_report_path = reports_path / "llm_edit_application_report.json"
     roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
     original_pretty_path = reports_path / "original_pretty.sql"
     deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
@@ -919,6 +987,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/roundtrip_report.json: {'yes' if roundtrip_report_path.exists() else 'no'}",
         f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
         f"reports/llm_workflow_report.json: {'yes' if llm_workflow_report_path.exists() else 'no'}",
+        f"reports/llm_edit_application_report.json: {'yes' if llm_edit_application_report_path.exists() else 'no'}",
         f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
         f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
         f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",
@@ -1013,6 +1082,8 @@ def main(argv: list[str] | None = None) -> int:
                 rc = _run_roundtrip_command(args)
             elif args.command == "validate-before-write":
                 rc = _run_validate_before_write_command(args)
+            elif args.command == "apply-llm-edits":
+                rc = _run_apply_llm_edits_command(args)
             elif args.command == "workspace-info":
                 rc = _run_workspace_info_command(args)
             elif args.command == "translate":
