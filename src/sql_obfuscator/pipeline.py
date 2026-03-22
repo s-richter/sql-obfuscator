@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from sqlglot.errors import ParseError
 
@@ -15,6 +16,13 @@ from .transformer import transform_statements
 
 _GO_STANDALONE_RE = re.compile(r"^\s*GO\s*$", re.IGNORECASE)
 _GO_PREFIX_RE = re.compile(r"^\s*GO\b", re.IGNORECASE)
+
+
+@dataclass
+class _ProcessedBatch:
+    output_sql: str
+    statement_count: int
+    fallback_preserved_statement_count: int
 
 
 def _extract_context_snippet(sql: str, max_length: int = 100) -> str:
@@ -53,17 +61,19 @@ def _process_batch(
     pretty: bool = False,
     batch_number: int = 1,
     total_batches: int = 1,
-) -> str:
+) -> _ProcessedBatch:
     if not batch_sql.strip():
-        return batch_sql
+        return _ProcessedBatch(output_sql=batch_sql, statement_count=0, fallback_preserved_statement_count=0)
 
     try:
         statements = parse_sql(batch_sql, dialect=dialect)
     except ParseError as exc:
-        error_msg = _format_parse_error(
-            exc, batch_sql, batch_number, total_batches)
+        error_msg = _format_parse_error(exc, batch_sql, batch_number, total_batches)
         raise ParseScriptError(error_msg) from exc
 
+    fallback_preserved_statement_count = sum(
+        1 for statement in statements if isinstance(statement.meta.get("raw_sql"), str)
+    )
     transformed = transform_statements(
         statements,
         registry=registry,
@@ -72,8 +82,12 @@ def _process_batch(
         dialect=dialect,
         profile=profile,
     )
-    return join_emitted_statements(
-        [emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in transformed]
+    return _ProcessedBatch(
+        output_sql=join_emitted_statements(
+            [emit_sql(stmt, dialect=dialect, pretty=pretty) for stmt in transformed]
+        ),
+        statement_count=len(statements),
+        fallback_preserved_statement_count=fallback_preserved_statement_count,
     )
 
 
@@ -95,6 +109,7 @@ class ObfuscationResult:
     mapping_payload: dict
     context_payload: dict
     redaction_payload: dict | None = None
+    obfuscation_report: dict[str, Any] | None = None
 
 
 def obfuscate_sql(
@@ -154,10 +169,11 @@ def obfuscate_sql_with_metadata(
     profile = get_dialect_profile(dialect)
     registry = IdentifierRegistry(profile=profile, seed=seed)
     batches = profile.split_batches(redaction_input_sql)
-    transformed_batches = []
+    transformed_batches: list[str] = []
     total_statements = 0
+    fallback_preserved_statement_count = 0
     for batch_idx, batch in enumerate(batches, start=1):
-        transformed_batch = _process_batch(
+        processed_batch = _process_batch(
             batch,
             dialect=dialect,
             registry=registry,
@@ -166,9 +182,9 @@ def obfuscate_sql_with_metadata(
             batch_number=batch_idx,
             total_batches=len(batches),
         )
-        transformed_batches.append(transformed_batch)
-        if batch.strip():
-            total_statements += len(parse_sql(batch, dialect=dialect))
+        transformed_batches.append(processed_batch.output_sql)
+        total_statements += processed_batch.statement_count
+        fallback_preserved_statement_count += processed_batch.fallback_preserved_statement_count
 
     output_sql = profile.join_batches(transformed_batches)
     mapping_payload = registry.mapping_payload()
@@ -186,9 +202,21 @@ def obfuscate_sql_with_metadata(
         "statement_count": total_statements,
         "mapping_entry_count": len(mapping_payload["entries"]),
     }
+    fully_transformed_statement_count = max(0, total_statements - fallback_preserved_statement_count)
+    obfuscation_report = {
+        "schema_version": 1,
+        "batch_count": len(batches),
+        "statement_count": total_statements,
+        "fully_transformed_statement_count": fully_transformed_statement_count,
+        "fallback_preserved_statement_count": fallback_preserved_statement_count,
+        "llm_safe_approved": fallback_preserved_statement_count == 0,
+        "redaction_mode": redaction_mode,
+        **redaction_result.summary,
+    }
     return ObfuscationResult(
         output_sql=output_sql,
         mapping_payload=mapping_payload,
         context_payload=context_payload,
         redaction_payload=redaction_result.redaction_payload,
+        obfuscation_report=obfuscation_report,
     )

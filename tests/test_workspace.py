@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from sql_obfuscator.errors import WorkspaceError
 from sql_obfuscator.workspace import (
     default_workspace_path,
     load_context_payload,
+    load_llm_workflow_report,
     load_mapping_payload,
     load_redaction_payload,
     save_workspace_artifacts,
@@ -213,3 +216,104 @@ def test_load_redaction_payload_rejects_invalid_entry_shape(tmp_path: Path):
 
     with pytest.raises(WorkspaceError, match="missing/invalid field 'original_this'"):
         load_redaction_payload(redaction_path)
+
+
+
+def test_save_workspace_artifacts_removes_stale_llm_workflow_report(tmp_path: Path):
+    workspace = tmp_path / "sample.obf"
+    mapping_payload = {
+        "schema_version": 1,
+        "entries": [],
+        "forward_index": {},
+        "reverse_index": {},
+    }
+    context_payload = {
+        "schema_version": 1,
+        "dialect": "tsql",
+        "seed": None,
+        "pretty": True,
+        "redact_literals": False,
+        "strip_comments": False,
+        "redaction_mode": "none",
+        "redaction_policy": "all",
+        "sensitive_columns": [],
+        "batch_count": 1,
+        "statement_count": 1,
+        "mapping_entry_count": 0,
+    }
+    llm_workflow_report = {
+        "schema_version": 1,
+        "llm_safe_requested": True,
+        "llm_safe_approved": True,
+        "obfuscation_summary": {"statement_count": 1},
+        "deobfuscation_summary": None,
+        "recommendations": [],
+    }
+
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "one.sql",
+        original_sql="SELECT 1;",
+        obfuscated_sql="SELECT 1;",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        llm_workflow_report_payload=llm_workflow_report,
+    )
+    assert (workspace / "reports" / "llm_workflow_report.json").exists()
+    assert (workspace / "reports" / "llm_workflow_report.schema.json").exists()
+
+    save_workspace_artifacts(
+        workspace_path=workspace,
+        input_path=tmp_path / "two.sql",
+        original_sql="SELECT 2;",
+        obfuscated_sql="SELECT 2;",
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        llm_workflow_report_payload=None,
+    )
+    assert (workspace / "reports" / "llm_workflow_report.json").exists() is False
+    assert (workspace / "reports" / "llm_workflow_report.schema.json").exists() is False
+
+
+
+def test_load_llm_workflow_report_valid(tmp_path: Path):
+    report_path = tmp_path / "llm_workflow_report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "llm_safe_requested": True,
+                "llm_safe_approved": False,
+                "obfuscation_summary": {"statement_count": 2},
+                "deobfuscation_summary": {"unknown_count": 0},
+                "recommendations": ["review fallback-preserved statements"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = load_llm_workflow_report(report_path)
+    assert payload["llm_safe_requested"] is True
+    assert payload["llm_safe_approved"] is False
+    assert payload["obfuscation_summary"]["statement_count"] == 2
+
+
+
+def test_load_llm_workflow_report_rejects_invalid_recommendations(tmp_path: Path):
+    report_path = tmp_path / "llm_workflow_report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "llm_safe_requested": True,
+                "llm_safe_approved": True,
+                "obfuscation_summary": {},
+                "deobfuscation_summary": None,
+                "recommendations": [123],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="recommendations"):
+        load_llm_workflow_report(report_path)

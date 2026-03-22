@@ -24,6 +24,7 @@ _NUMERIC_PLACEHOLDER_RE = re.compile(r"^9\d{11}$")
 class RedactionResult:
     output_sql: str
     redaction_payload: dict[str, Any] | None
+    summary: dict[str, Any]
 
 
 def apply_redaction(
@@ -42,15 +43,24 @@ def apply_redaction(
     if redaction_policy not in ALLOWED_REDACTION_POLICIES:
         raise WorkspaceError(f"Unsupported redaction policy: {redaction_policy}")
     if redaction_mode == "none":
-        return RedactionResult(output_sql=script, redaction_payload=None)
+        return RedactionResult(
+            output_sql=script,
+            redaction_payload=None,
+            summary=_empty_redaction_summary(),
+        )
     if not redact_literals and not strip_comments:
-        return RedactionResult(output_sql=script, redaction_payload=None)
+        return RedactionResult(
+            output_sql=script,
+            redaction_payload=None,
+            summary=_empty_redaction_summary(),
+        )
 
     profile = get_dialect_profile(dialect)
     batches = profile.split_batches(script)
     output_batches: list[str] = []
     literal_entries: list[dict[str, Any]] = []
     literal_index = 0
+    summary = _empty_redaction_summary()
 
     def _next_literal_index() -> int:
         nonlocal literal_index
@@ -77,6 +87,7 @@ def apply_redaction(
                 sensitive_columns=sensitive_columns or set(),
                 literal_entries=literal_entries,
                 next_index=_next_literal_index,
+                summary=summary,
             )
             for stmt in statements
         ]
@@ -95,6 +106,7 @@ def apply_redaction(
     return RedactionResult(
         output_sql=profile.join_batches(output_batches),
         redaction_payload=redaction_payload,
+        summary=summary,
     )
 
 
@@ -108,9 +120,13 @@ def _redact_statement(
     sensitive_columns: set[str],
     literal_entries: list[dict[str, Any]],
     next_index,
+    summary: dict[str, Any],
 ) -> Expression:
     def _transform(node: Expression) -> Expression:
         if strip_comments and hasattr(node, "comments"):
+            comments = getattr(node, "comments", None)
+            if comments:
+                summary["stripped_comment_count"] += len(comments)
             node.comments = None
         if redact_literals and isinstance(node, exp.Literal):
             if not _should_redact_literal(
@@ -119,6 +135,11 @@ def _redact_statement(
                 sensitive_columns=sensitive_columns,
             ):
                 return node
+            summary["redacted_literal_count"] += 1
+            if node.is_string:
+                summary["redacted_string_literal_count"] += 1
+            else:
+                summary["redacted_numeric_literal_count"] += 1
             if redaction_mode == "irreversible":
                 value = "<REDACTED_STR>" if node.is_string else "0"
                 return exp.Literal(this=value, is_string=node.is_string)
@@ -135,6 +156,15 @@ def _redact_statement(
         return node
 
     return statement.transform(_transform, copy=True)
+
+
+def _empty_redaction_summary() -> dict[str, Any]:
+    return {
+        "redacted_literal_count": 0,
+        "redacted_string_literal_count": 0,
+        "redacted_numeric_literal_count": 0,
+        "stripped_comment_count": 0,
+    }
 
 
 def _should_skip_literal_redaction(node: exp.Literal) -> bool:

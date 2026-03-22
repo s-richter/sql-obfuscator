@@ -12,6 +12,7 @@ MAPPING_SCHEMA_VERSION = 1
 CONTEXT_SCHEMA_VERSION = 1
 INTEGRITY_SCHEMA_VERSION = 1
 REDACTION_SCHEMA_VERSION = 1
+LLM_WORKFLOW_REPORT_SCHEMA_VERSION = 1
 
 MAPPING_JSON_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -79,6 +80,19 @@ REDACTION_JSON_SCHEMA: dict[str, Any] = {
     ],
 }
 
+LLM_WORKFLOW_REPORT_JSON_SCHEMA: dict[str, Any] = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SQL LLM Workflow Report Schema",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "llm_safe_requested",
+        "llm_safe_approved",
+        "obfuscation_summary",
+        "deobfuscation_summary",
+    ],
+}
+
 INTEGRITY_TRACKED_FILES = [
     "original.sql",
     "obfuscated.sql",
@@ -101,6 +115,7 @@ def save_workspace_artifacts(
     context_payload: dict[str, Any],
     llm_instructions_text: str | None = None,
     redaction_payload: dict[str, Any] | None = None,
+    llm_workflow_report_payload: dict[str, Any] | None = None,
 ) -> None:
     try:
         workspace_path.mkdir(parents=True, exist_ok=True)
@@ -139,6 +154,14 @@ def save_workspace_artifacts(
     else:
         _remove_if_exists(workspace_path / "redaction.json")
         _remove_if_exists(workspace_path / "redaction.schema.json")
+    if llm_workflow_report_payload is not None:
+        save_llm_workflow_report(
+            workspace_path=workspace_path,
+            report_payload=llm_workflow_report_payload,
+        )
+    else:
+        _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.json")
+        _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.schema.json")
     _write_json(
         workspace_path / "integrity.json",
         _build_integrity_payload(workspace_path, tracked_files=tracked_files),
@@ -160,6 +183,12 @@ def load_context_payload(context_path: Path) -> dict[str, Any]:
 def load_redaction_payload(redaction_path: Path) -> dict[str, Any]:
     payload = _read_json(redaction_path)
     _validate_redaction_payload(payload, source=redaction_path)
+    return payload
+
+
+def load_llm_workflow_report(report_path: Path) -> dict[str, Any]:
+    payload = _read_json(report_path)
+    _validate_llm_workflow_report_payload(payload, source=report_path)
     return payload
 
 
@@ -271,6 +300,21 @@ def save_translation_artifacts(
         _write_text(workspace_path / "translated.sql", translated_sql)
     else:
         _remove_if_exists(workspace_path / "translated.sql")
+
+
+def save_llm_workflow_report(
+    *,
+    workspace_path: Path,
+    report_payload: dict[str, Any],
+) -> None:
+    reports_path = workspace_path / "reports"
+    try:
+        reports_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
+
+    _write_json(reports_path / "llm_workflow_report.schema.json", LLM_WORKFLOW_REPORT_JSON_SCHEMA)
+    _write_json(reports_path / "llm_workflow_report.json", report_payload)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -508,24 +552,58 @@ def _validate_redaction_payload(payload: dict[str, Any], *, source: Path) -> Non
             )
 
 
+def _validate_llm_workflow_report_payload(payload: dict[str, Any], *, source: Path) -> None:
+    if payload.get("schema_version") != LLM_WORKFLOW_REPORT_SCHEMA_VERSION:
+        raise WorkspaceError(
+            f"Unsupported LLM workflow report schema in {source}: {payload.get('schema_version')}"
+        )
+    for field in ("llm_safe_requested", "llm_safe_approved"):
+        if not isinstance(payload.get(field), bool):
+            raise WorkspaceError(
+                f"llm_workflow_report.json missing/invalid field '{field}' in {source}"
+            )
+    obfuscation_summary = payload.get("obfuscation_summary")
+    if not isinstance(obfuscation_summary, dict):
+        raise WorkspaceError(
+            f"llm_workflow_report.json missing/invalid field 'obfuscation_summary' in {source}"
+        )
+    deobfuscation_summary = payload.get("deobfuscation_summary")
+    if deobfuscation_summary is not None and not isinstance(deobfuscation_summary, dict):
+        raise WorkspaceError(
+            f"llm_workflow_report.json has invalid field 'deobfuscation_summary' in {source}"
+        )
+    recommendations = payload.get("recommendations")
+    if recommendations is not None:
+        if not isinstance(recommendations, list) or any(
+            not isinstance(item, str) for item in recommendations
+        ):
+            raise WorkspaceError(
+                f"llm_workflow_report.json has invalid field 'recommendations' in {source}"
+            )
+
+
 def _default_llm_instructions(*, input_path: Path, dialect: str) -> str:
     return (
         "# LLM Instructions for Obfuscated SQL\n\n"
-        "You are optimizing an obfuscated SQL script. "
-        "The output will be de-obfuscated afterward.\n\n"
+        "You are editing an obfuscated SQL script. The output will be de-obfuscated afterward.\n\n"
         "## Input Context\n"
         f"- Original input file: `{input_path.name}`\n"
         f"- SQL dialect: `{dialect}`\n\n"
-        "## Requirements\n"
+        "## Workflow Modes\n"
+        "- Recommended mode: bounded edit. Preserve obfuscated identifiers and overall statement structure.\n"
+        "- Expert mode: larger rewrites are allowed only when explicitly required and can trigger unresolved, ambiguous, or low-confidence restore results.\n\n"
+        "## Bounded-Edit Requirements\n"
         "1. Keep obfuscated identifiers unchanged whenever possible.\n"
-        "2. Do not invent new table/column names unless absolutely required.\n"
+        "2. Do not invent new table or column names unless absolutely required.\n"
         "3. Keep alias structure stable and avoid renaming aliases.\n"
         "4. Do not rewrite JOIN graph, CTE hierarchy, or table lineage unless required.\n"
         "5. Preserve placeholder literals exactly when present (for reversible redaction).\n"
-        "6. Prefer local predicate/projection optimizations over large structural rewrites.\n"
+        "6. Prefer local predicate or projection optimizations over large structural rewrites.\n"
         "7. Preserve SQL semantics unless explicitly asked to change behavior.\n\n"
-        "## If new identifiers are unavoidable\n"
-        "- Minimize the number of new identifiers.\n"
-        "- Keep new identifiers syntactically valid for the dialect.\n"
-        "- Clearly comment where and why new identifiers were introduced.\n"
+        "## Expert Mode Guardrails\n"
+        "- Edit the smallest region that solves the task.\n"
+        "- Avoid reordering statements unless required.\n"
+        "- Minimize new identifiers and keep any new identifiers syntactically valid for the dialect.\n"
+        "- If you must introduce larger rewrites, keep untouched statements as close to the input as possible.\n"
+        "- If exact identifier or placeholder preservation is not possible, say so in a short SQL comment.\n"
     )

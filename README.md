@@ -7,7 +7,7 @@ Start here for a scenario-based walkthrough of commands, flags, and expected out
 - [Command Tutorial](docs/COMMAND_TUTORIAL.md)
 
 **NOTE**: the code and the documentation in this repository was largely written by **GPT-5.3-Codex Medium**.
-**NOTE**: Due to limitations in the library used for parsing especially T-SQL scripts (_sqlglot_), certain advanced scripts might not be parsed correctly. If this is the case, using an LLM to fix edge cases is the simplest option.
+**NOTE**: Due to limitations in the library used for parsing especially T-SQL scripts (_sqlglot_), certain advanced scripts might not be parsed correctly. If this is the case, using an LLM to fix edge cases is the simplest option. Use `--llm-safe` when preparing scripts for an external LLM so parser-compatibility fallback is surfaced before sharing.
 
 ## What It Does
 
@@ -62,6 +62,9 @@ python obfuscator.py obfuscate script.sql --workspace my_run.obf
 
 # Obfuscate with irreversible literal/comment redaction for LLM sharing
 python obfuscator.py obfuscate script.sql --redaction-mode irreversible --redact-literals --strip-comments
+
+# Obfuscate in fail-closed LLM-safe mode for external sharing
+python obfuscator.py obfuscate script.sql --llm-safe --redaction-mode irreversible --redact-literals --strip-comments
 
 # Validate LLM-edited obfuscated SQL without writing outputs
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql --dry-run
@@ -148,6 +151,13 @@ Safety note:
 
 - Redaction is AST-based (`sqlglot`) and not regex-only; regex-only redaction is intentionally not the primary privacy mechanism.
 
+## LLM Workflow Modes
+
+- `bounded-edit` is the recommended external LLM workflow. Keep obfuscated identifiers, aliases, placeholder literals, and overall statement structure stable.
+- `expert mode` is the fallback path when you knowingly accept larger rewrites, more manual review, and possible low-confidence or unresolved restore results.
+- `--llm-safe` is intended for bounded-edit sharing. It fails closed when any statement was preserved through parser compatibility fallback/raw passthrough instead of going through the normal AST obfuscation path.
+- `reports/llm_workflow_report.json` summarizes total statements, fully transformed statements, fallback-preserved statements, redaction counts, and later unresolved/ambiguous/low-confidence de-obfuscation counts.
+
 ## Workspace Model
 
 By default, `script.sql` produces a workspace `script.obf/`.
@@ -171,6 +181,8 @@ script.obf/
 `-- reports/
     |-- deobfuscation_report.json       # after deobfuscate/roundtrip
     |-- coverage_report.txt             # after deobfuscate/roundtrip
+    |-- llm_workflow_report.schema.json # after obfuscate/roundtrip
+    |-- llm_workflow_report.json        # after obfuscate/roundtrip
     |-- roundtrip_report.json           # after roundtrip
     |-- roundtrip_diff.txt              # after roundtrip --diff-report
     |-- original_pretty.sql             # normalized with sqlglot pretty formatting
@@ -217,12 +229,15 @@ Options:
 - `--redaction-sensitive-columns <csv>`: required when policy is `sensitive`
 - `--stdout-only`: print obfuscated SQL to stdout without writing sibling output file
 - `--output-dir <dir>`: write obfuscated output file into a specific directory (file input only)
+- `--llm-safe` / `--no-llm-safe`: fail closed when parser compatibility fallback/raw passthrough preserves statements that are unsafe for external LLM sharing
 
 Output:
 
 - Prints obfuscated SQL to stdout
 - Writes sibling output file `<input_stem>_obfuscated<ext>` (file input only, unless `--stdout-only` is used)
 - Writes workspace artifacts
+- Writes `reports/llm_workflow_report.json` with obfuscation safety summary and later de-obfuscation safety counts
+- Warns when parser compatibility fallback/raw passthrough preserved statements are present; `--llm-safe` turns that warning into an error
 - If input is `-` (stdin), no sibling output file is written; workspace default is `stdin.obf`
 
 ### `deobfuscate`
@@ -463,16 +478,20 @@ Note: this does not replace workspace/sibling file output; those are still writt
 
 ## Recommended LLM Workflow
 
-1. Obfuscate:
+1. Obfuscate in bounded-edit mode:
 
 ```bash
-python obfuscator.py obfuscate script.sql
+python obfuscator.py obfuscate script.sql --llm-safe --redaction-mode irreversible --redact-literals --strip-comments
 ```
 
-2. Provide LLM with:
+If this fails with an LLM-safe validation error, inspect `script.obf/reports/llm_workflow_report.json`. That means one or more statements were preserved through parser compatibility fallback/raw passthrough and the script was not approved for external LLM sharing in bounded-edit mode.
+
+2. Provide the LLM with:
 
 - `script.obf/obfuscated.sql`
 - `script.obf/llm_instructions.md`
+
+The default instructions distinguish recommended bounded-edit behavior from expert mode guardrails.
 
 3. Save LLM output (example):
 
@@ -490,11 +509,13 @@ python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_r
 python obfuscator.py deobfuscate --workspace script.obf --input script.obf/llm_response_obfuscated.sql
 ```
 
-Recommended privacy-oriented variant:
+Expert-mode variant when you need reversible placeholders for later restoration:
 
 ```bash
 python obfuscator.py obfuscate script.sql --redaction-mode reversible --redact-literals --strip-comments
 ```
+
+Use this only when you accept that parser compatibility fallback or larger rewrites may require manual review before sharing or execution.
 
 ### Cross-Dialect LLM Workflow
 
@@ -523,6 +544,22 @@ python obfuscator.py deobfuscate --workspace script.obf --input edited_tsql.sql 
 ```
 
 ## Troubleshooting
+
+### LLM-Safe Validation Failed
+
+Symptoms:
+
+- `obfuscate` or `roundtrip` fails with `LLM-safe validation failed`.
+
+Meaning:
+
+- One or more statements were preserved through parser compatibility fallback/raw passthrough instead of being fully transformed by the AST obfuscation pipeline.
+
+Actions:
+
+1. Inspect `reports/llm_workflow_report.json` and confirm `fallback_preserved_statement_count`.
+2. Treat the script as expert-mode only unless you can remove or isolate the fallback-preserved statements.
+3. Add redaction and re-run with `--llm-safe` before sending the script to an external LLM.
 
 ### Unknown Identifiers
 

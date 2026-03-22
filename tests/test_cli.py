@@ -1252,3 +1252,116 @@ def test_cli_stdin_seed_determinism_obfuscate(tmp_path: Path, monkeypatch, capsy
     assert rc1 == 0
     assert rc2 == 0
     assert (ws1 / "obfuscated.sql").read_text(encoding="utf-8") == (ws2 / "obfuscated.sql").read_text(encoding="utf-8")
+
+
+
+def test_cli_default_llm_instructions_describe_bounded_and_expert_modes(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file)])
+    capsys.readouterr()
+
+    assert rc == 0
+    instructions = (tmp_path / "input.obf" / "llm_instructions.md").read_text(encoding="utf-8")
+    assert "Recommended mode: bounded edit" in instructions
+    assert "Expert mode" in instructions
+
+
+def test_cli_obfuscate_warns_when_fallback_preserved_statements_exist(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["obfuscate", str(sql_file), "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Warning:" in captured.err
+    assert "fallback/raw passthrough" in captured.err
+    assert (tmp_path / "input_obfuscated.sql").exists()
+
+    report = json.loads((workspace / "reports" / "llm_workflow_report.json").read_text(encoding="utf-8"))
+    assert report["llm_safe_requested"] is False
+    assert report["llm_safe_approved"] is False
+    assert report["obfuscation_summary"]["statement_count"] == 2
+    assert report["obfuscation_summary"]["fully_transformed_statement_count"] == 1
+    assert report["obfuscation_summary"]["fallback_preserved_statement_count"] == 1
+    assert report["obfuscation_summary"]["redacted_literal_count"] == 0
+    assert any("parser compatibility fallback/raw passthrough" in item for item in report["recommendations"])
+
+
+def test_cli_obfuscate_llm_safe_blocks_fallback_preserved_statements(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["obfuscate", str(sql_file), "--workspace", str(workspace), "--llm-safe"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "LLM-safe validation failed" in captured.err
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (workspace / "obfuscated.sql").exists()
+
+    report = json.loads((workspace / "reports" / "llm_workflow_report.json").read_text(encoding="utf-8"))
+    assert report["llm_safe_requested"] is True
+    assert report["llm_safe_approved"] is False
+    assert report["obfuscation_summary"]["fallback_preserved_statement_count"] == 1
+
+
+def test_cli_deobfuscate_updates_llm_workflow_report(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users WHERE Status = 'secret';", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    assert (
+        main(
+            [
+                "obfuscate",
+                str(sql_file),
+                "--workspace",
+                str(workspace),
+                "--redaction-mode",
+                "reversible",
+                "--redact-literals",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    rc = main(
+        [
+            "deobfuscate",
+            "--workspace",
+            str(workspace),
+            "--input",
+            str(workspace / "obfuscated.sql"),
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    report = json.loads((workspace / "reports" / "llm_workflow_report.json").read_text(encoding="utf-8"))
+    assert report["llm_safe_requested"] is False
+    assert report["llm_safe_approved"] is True
+    assert report["deobfuscation_summary"]["unknown_count"] == 0
+    assert report["deobfuscation_summary"]["ambiguous_count"] == 0
+    assert report["deobfuscation_summary"]["low_confidence_count"] == 0
+    assert report["deobfuscation_summary"]["redaction_unknown_placeholder_count"] == 0
+    assert report["deobfuscation_summary"]["redaction_missing_placeholder_count"] == 0
+
+
+def test_cli_workspace_info_includes_llm_workflow_report(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+
+    assert main(["obfuscate", str(sql_file)]) == 0
+    capsys.readouterr()
+
+    rc = main(["workspace-info", "--workspace", str(tmp_path / "input.obf")])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "reports/llm_workflow_report.json: yes" in captured.out

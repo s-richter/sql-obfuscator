@@ -20,9 +20,11 @@ from .translation import translate_sql_with_report
 from .workspace import (
     default_workspace_path,
     load_context_payload,
+    load_llm_workflow_report,
     load_mapping_payload,
     load_redaction_payload,
     save_deobfuscation_artifacts,
+    save_llm_workflow_report,
     save_roundtrip_reports,
     save_translation_artifacts,
     save_workspace_artifacts,
@@ -147,6 +149,12 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         "--output-dir",
         default=None,
         help="Optional directory for obfuscated output files (file input only)",
+    )
+    parser.add_argument(
+        "--llm-safe",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Fail closed when obfuscation preserves fallback/raw statements that are unsafe for external LLM sharing",
     )
 
 
@@ -456,15 +464,11 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     output_sql = result.output_sql
-    output_path = _resolve_output_path_for_input(
-        input_path,
-        output_dir=args.output_dir,
-        builder=_output_path_for_input,
-        context="obfuscate",
-    )
-    if output_path is not None and not args.stdout_only:
-        _write_output_file(output_path, output_sql)
     llm_instructions_text = _read_optional_template(args.instruction_template)
+    llm_workflow_report = _build_llm_workflow_report(
+        obfuscation_summary=result.obfuscation_report or {},
+        llm_safe_requested=bool(args.llm_safe),
+    )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
@@ -476,11 +480,24 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         context_payload=result.context_payload,
         llm_instructions_text=llm_instructions_text,
         redaction_payload=result.redaction_payload,
+        llm_workflow_report_payload=llm_workflow_report,
     )
-    # Validate schema and data shape immediately after write.
     load_mapping_payload(workspace_path / "mapping.json")
     load_context_payload(workspace_path / "context.json")
     validate_workspace_integrity(workspace_path)
+    _enforce_or_warn_llm_safety(
+        obfuscation_summary=result.obfuscation_report or {},
+        llm_safe_requested=bool(args.llm_safe),
+    )
+
+    output_path = _resolve_output_path_for_input(
+        input_path,
+        output_dir=args.output_dir,
+        builder=_output_path_for_input,
+        context="obfuscate",
+    )
+    if output_path is not None and not args.stdout_only:
+        _write_output_file(output_path, output_sql)
 
     print(output_sql)
     return 0
@@ -529,6 +546,95 @@ def _evaluate_deobfuscation_safety(report: dict) -> tuple[bool, bool]:
     return has_unresolved, has_low_confidence
 
 
+def _build_deobfuscation_summary(report: dict) -> dict:
+    redaction_report = report.get("redaction")
+    return {
+        "mapped_identifiers": report.get("mapped_identifiers", 0),
+        "unknown_count": report.get("unknown_count", 0),
+        "ambiguous_count": report.get("ambiguous_count", 0),
+        "low_confidence_count": report.get("low_confidence_count", 0),
+        "redaction_unknown_placeholder_count": (
+            redaction_report.get("unknown_placeholder_count", 0)
+            if isinstance(redaction_report, dict)
+            else 0
+        ),
+        "redaction_missing_placeholder_count": (
+            redaction_report.get("missing_placeholder_count", 0)
+            if isinstance(redaction_report, dict)
+            else 0
+        ),
+    }
+
+
+def _build_llm_workflow_report(
+    *,
+    obfuscation_summary: dict,
+    llm_safe_requested: bool,
+    deobfuscation_report: dict | None = None,
+) -> dict:
+    recommendations: list[str] = []
+    fallback_preserved = obfuscation_summary.get("fallback_preserved_statement_count", 0)
+    if fallback_preserved > 0:
+        recommendations.append(
+            "Some statements were preserved via parser compatibility fallback/raw passthrough. "
+            "Review carefully before sharing with an external LLM."
+        )
+    if isinstance(deobfuscation_report, dict):
+        for recommendation in deobfuscation_report.get("recommendations", []):
+            if isinstance(recommendation, str) and recommendation not in recommendations:
+                recommendations.append(recommendation)
+    return {
+        "schema_version": 1,
+        "llm_safe_requested": llm_safe_requested,
+        "llm_safe_approved": bool(obfuscation_summary.get("llm_safe_approved", fallback_preserved == 0)),
+        "obfuscation_summary": obfuscation_summary,
+        "deobfuscation_summary": (
+            _build_deobfuscation_summary(deobfuscation_report)
+            if isinstance(deobfuscation_report, dict)
+            else None
+        ),
+        "recommendations": recommendations,
+    }
+
+
+def _update_llm_workflow_report_with_deobfuscation(*, workspace_path: Path, report: dict) -> None:
+    report_path = workspace_path / "reports" / "llm_workflow_report.json"
+    if not report_path.exists():
+        return
+    existing_report = load_llm_workflow_report(report_path)
+    save_llm_workflow_report(
+        workspace_path=workspace_path,
+        report_payload=_build_llm_workflow_report(
+            obfuscation_summary=existing_report.get("obfuscation_summary", {}),
+            llm_safe_requested=bool(existing_report.get("llm_safe_requested", False)),
+            deobfuscation_report=report,
+        ),
+    )
+
+
+def _enforce_or_warn_llm_safety(*, obfuscation_summary: dict, llm_safe_requested: bool) -> None:
+    fallback_preserved = obfuscation_summary.get("fallback_preserved_statement_count", 0)
+    if fallback_preserved <= 0:
+        return
+    noun = "statement" if fallback_preserved == 1 else "statements"
+    verb = "was" if fallback_preserved == 1 else "were"
+    detail = (
+        f"{fallback_preserved} {noun} {verb} preserved via parser compatibility fallback/raw passthrough "
+        "and may still expose identifiers or literals."
+    )
+    if llm_safe_requested:
+        raise WorkspaceError(
+            "LLM-safe validation failed: "
+            f"{detail} Review reports/llm_workflow_report.json or rerun without --llm-safe for expert mode."
+        )
+    print(
+        "Warning: "
+        f"{detail} Review reports/llm_workflow_report.json before sharing with an external LLM. "
+        "Use --llm-safe to fail closed.",
+        file=sys.stderr,
+    )
+
+
 def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     input_path = Path(args.input)
@@ -574,6 +680,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=deobfuscated_sql,
         report_payload=report,
     )
+    _update_llm_workflow_report_with_deobfuscation(workspace_path=workspace_path, report=report)
     print(deobfuscated_sql)
     return 0
 
@@ -615,6 +722,7 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=deobfuscated_sql,
         report_payload=report,
     )
+    _update_llm_workflow_report_with_deobfuscation(workspace_path=workspace_path, report=report)
     print("validation passed: wrote de-obfuscated output")
     print(deobfuscated_sql)
     return 0
@@ -640,15 +748,11 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
     )
     obfuscated_sql = obfuscation.output_sql
-    output_path = _resolve_output_path_for_input(
-        input_path,
-        output_dir=args.output_dir,
-        builder=_output_path_for_input,
-        context="roundtrip",
-    )
-    if output_path is not None and not args.stdout_only:
-        _write_output_file(output_path, obfuscated_sql)
     llm_instructions_text = _read_optional_template(args.instruction_template)
+    llm_workflow_report = _build_llm_workflow_report(
+        obfuscation_summary=obfuscation.obfuscation_report or {},
+        llm_safe_requested=bool(args.llm_safe),
+    )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
@@ -660,10 +764,24 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         context_payload=obfuscation.context_payload,
         llm_instructions_text=llm_instructions_text,
         redaction_payload=obfuscation.redaction_payload,
+        llm_workflow_report_payload=llm_workflow_report,
     )
     mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
     context_payload = load_context_payload(workspace_path / "context.json")
     validate_workspace_integrity(workspace_path)
+    _enforce_or_warn_llm_safety(
+        obfuscation_summary=obfuscation.obfuscation_report or {},
+        llm_safe_requested=bool(args.llm_safe),
+    )
+
+    output_path = _resolve_output_path_for_input(
+        input_path,
+        output_dir=args.output_dir,
+        builder=_output_path_for_input,
+        context="roundtrip",
+    )
+    if output_path is not None and not args.stdout_only:
+        _write_output_file(output_path, obfuscated_sql)
 
     deobfuscated_sql, deobfuscation_report = deobfuscate_sql_with_report(
         obfuscated_sql,
@@ -684,6 +802,10 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         workspace_path=workspace_path,
         deobfuscated_sql=deobfuscated_sql,
         report_payload=deobfuscation_report,
+    )
+    _update_llm_workflow_report_with_deobfuscation(
+        workspace_path=workspace_path,
+        report=deobfuscation_report,
     )
 
     dialect = context_payload.get("dialect", "tsql")
@@ -760,6 +882,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
     deobf_report_path = reports_path / "deobfuscation_report.json"
     roundtrip_report_path = reports_path / "roundtrip_report.json"
     coverage_report_path = reports_path / "coverage_report.txt"
+    llm_workflow_report_path = reports_path / "llm_workflow_report.json"
     roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
     original_pretty_path = reports_path / "original_pretty.sql"
     deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
@@ -792,6 +915,7 @@ def _run_workspace_info_command(args: argparse.Namespace) -> int:
         f"reports/deobfuscation_report.json: {'yes' if deobf_report_path.exists() else 'no'}",
         f"reports/roundtrip_report.json: {'yes' if roundtrip_report_path.exists() else 'no'}",
         f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
+        f"reports/llm_workflow_report.json: {'yes' if llm_workflow_report_path.exists() else 'no'}",
         f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
         f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
         f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",
