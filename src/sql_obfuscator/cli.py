@@ -18,7 +18,17 @@ from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .translation import translate_sql_with_report
-from .workflow import LlmSafetyDecision, LlmSafetyError, ObfuscationOptions, prepare_workspace
+from .workflow import (
+    DeobfuscationResult,
+    DeobfuscationSafetyError,
+    LlmSafetyDecision,
+    LlmSafetyError,
+    ObfuscationOptions,
+    WorkspaceSnapshot,
+    analyze_deobfuscation,
+    prepare_workspace,
+    require_safe_deobfuscation,
+)
 from .workspace import (
     default_workspace_path,
     load_context_payload,
@@ -548,47 +558,43 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_workspace_snapshot(workspace_path: Path) -> WorkspaceSnapshot:
+    validate_workspace_integrity(workspace_path)
+    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
+    context_payload = load_context_payload(workspace_path / "context.json")
+    redaction_path = workspace_path / "redaction.json"
+    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
+    llm_workflow_report_path = workspace_path / "reports" / "llm_workflow_report.json"
+    return WorkspaceSnapshot(
+        obfuscated_sql=_read_sql_file(workspace_path / "obfuscated.sql"),
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        redaction_payload=(
+            load_redaction_payload(redaction_path)
+            if redaction_path.exists()
+            else None
+        ),
+        privacy_summary=(
+            load_privacy_summary_report(privacy_summary_path)
+            if privacy_summary_path.exists()
+            else {}
+        ),
+        llm_workflow_report=(
+            load_llm_workflow_report(llm_workflow_report_path)
+            if llm_workflow_report_path.exists()
+            else {}
+        ),
+    )
+
+
 def _deobfuscate_pipeline(
     *,
     workspace_path: Path,
     input_path: Path,
-) -> tuple[str, dict, dict]:
-    validate_workspace_integrity(workspace_path)
-    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
-    context_payload = load_context_payload(workspace_path / "context.json")
+) -> DeobfuscationResult:
+    snapshot = _load_workspace_snapshot(workspace_path)
     edited_sql = _read_sql_file(input_path)
-
-    deobfuscated_sql, report = deobfuscate_sql_with_report(
-        edited_sql,
-        mapping_payload=mapping_payload,
-        context_payload=context_payload,
-    )
-    redaction_path = workspace_path / "redaction.json"
-    redaction_report: dict | None = None
-    if redaction_path.exists():
-        redaction_payload = load_redaction_payload(redaction_path)
-        deobfuscated_sql, redaction_report = restore_reversible_redaction(
-            deobfuscated_sql,
-            dialect=context_payload.get("dialect", "tsql"),
-            pretty=bool(context_payload.get("pretty", True)),
-            redaction_payload=redaction_payload,
-        )
-        report["redaction"] = redaction_report
-    return deobfuscated_sql, report, context_payload
-
-
-def _evaluate_deobfuscation_safety(report: dict) -> tuple[bool, bool]:
-    redaction_unresolved = False
-    redaction_report = report.get("redaction")
-    if redaction_report is not None:
-        redaction_unresolved = (
-            redaction_report.get("unknown_placeholder_count", 0) > 0
-            or redaction_report.get("missing_placeholder_count", 0) > 0
-        )
-    has_unresolved = report.get("unknown_count", 0) > 0 or report.get("ambiguous_count", 0) > 0
-    has_unresolved = has_unresolved or redaction_unresolved
-    has_low_confidence = report.get("low_confidence_count", 0) > 0
-    return has_unresolved, has_low_confidence
+    return analyze_deobfuscation(snapshot, edited_sql)
 
 
 def _build_deobfuscation_summary(report: dict) -> dict:
@@ -714,6 +720,19 @@ def _update_llm_workflow_report_with_deobfuscation(*, workspace_path: Path, repo
     )
 
 
+def _save_updated_llm_workflow_report(
+    *,
+    workspace_path: Path,
+    report_payload: dict,
+) -> None:
+    report_path = workspace_path / "reports" / "llm_workflow_report.json"
+    if report_path.exists():
+        save_llm_workflow_report(
+            workspace_path=workspace_path,
+            report_payload=report_payload,
+        )
+
+
 def _enforce_or_warn_llm_safety(
     *,
     obfuscation_summary: dict,
@@ -772,11 +791,11 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
 def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     input_path = Path(args.input)
-    deobfuscated_sql, report, _ = _deobfuscate_pipeline(
+    result = _deobfuscate_pipeline(
         workspace_path=workspace_path,
         input_path=input_path,
     )
-    has_unresolved, has_low_confidence = _evaluate_deobfuscation_safety(report)
+    report = result.report
     if args.dry_run:
         print("deobfuscate dry-run summary:")
         print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
@@ -792,41 +811,50 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
             print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
         for recommendation in report.get("recommendations", []):
             print(f"recommendation: {recommendation}")
-        if has_unresolved:
+        if result.safety.has_unresolved:
             return 1
         return 0
 
-    if has_unresolved and not args.allow_unresolved:
-        raise WorkspaceError(
-            "De-obfuscation found unresolved mappings. "
-            "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
+    try:
+        require_safe_deobfuscation(
+            result,
+            allow_unresolved=bool(args.allow_unresolved),
+            allow_low_confidence=bool(args.allow_low_confidence),
         )
-    if has_low_confidence and not args.allow_low_confidence:
+    except DeobfuscationSafetyError as exc:
+        if exc.reason == "unresolved":
+            raise WorkspaceError(
+                "De-obfuscation found unresolved mappings. "
+                "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
+            ) from exc
         raise WorkspaceError(
             "De-obfuscation found low-confidence mappings. "
             "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
-        )
+        ) from exc
 
     output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
-    _write_output_file(output_path, deobfuscated_sql)
+    _write_output_file(output_path, result.deobfuscated_sql)
     save_deobfuscation_artifacts(
         workspace_path=workspace_path,
-        deobfuscated_sql=deobfuscated_sql,
+        deobfuscated_sql=result.deobfuscated_sql,
         report_payload=report,
     )
-    _update_llm_workflow_report_with_deobfuscation(workspace_path=workspace_path, report=report)
-    print(deobfuscated_sql)
+    _save_updated_llm_workflow_report(
+        workspace_path=workspace_path,
+        report_payload=result.llm_workflow_report,
+    )
+    print(result.deobfuscated_sql)
     return 0
 
 
 def _run_validate_before_write_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     input_path = Path(args.input)
-    deobfuscated_sql, report, _ = _deobfuscate_pipeline(
+    result = _deobfuscate_pipeline(
         workspace_path=workspace_path,
         input_path=input_path,
     )
-    has_unresolved, has_low_confidence = _evaluate_deobfuscation_safety(report)
+    report = result.report
 
     print("validate-before-write summary:")
     print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
@@ -838,27 +866,36 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
         print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
         print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
 
-    if has_unresolved and not args.allow_unresolved:
-        raise WorkspaceError(
-            "Validation failed: unresolved mappings found. "
-            "Use --allow-unresolved to force output."
+    try:
+        require_safe_deobfuscation(
+            result,
+            allow_unresolved=bool(args.allow_unresolved),
+            allow_low_confidence=bool(args.allow_low_confidence),
         )
-    if has_low_confidence and not args.allow_low_confidence:
+    except DeobfuscationSafetyError as exc:
+        if exc.reason == "unresolved":
+            raise WorkspaceError(
+                "Validation failed: unresolved mappings found. "
+                "Use --allow-unresolved to force output."
+            ) from exc
         raise WorkspaceError(
             "Validation failed: low-confidence mappings found. "
             "Use --allow-low-confidence to force output."
-        )
+        ) from exc
 
     output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
-    _write_output_file(output_path, deobfuscated_sql)
+    _write_output_file(output_path, result.deobfuscated_sql)
     save_deobfuscation_artifacts(
         workspace_path=workspace_path,
-        deobfuscated_sql=deobfuscated_sql,
+        deobfuscated_sql=result.deobfuscated_sql,
         report_payload=report,
     )
-    _update_llm_workflow_report_with_deobfuscation(workspace_path=workspace_path, report=report)
+    _save_updated_llm_workflow_report(
+        workspace_path=workspace_path,
+        report_payload=result.llm_workflow_report,
+    )
     print("validation passed: wrote de-obfuscated output")
-    print(deobfuscated_sql)
+    print(result.deobfuscated_sql)
     return 0
 
 
