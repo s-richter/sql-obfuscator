@@ -18,6 +18,7 @@ from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .translation import translate_sql_with_report
+from .workflow import LlmSafetyDecision, LlmSafetyError, ObfuscationOptions, prepare_workspace
 from .workspace import (
     default_workspace_path,
     load_context_payload,
@@ -484,25 +485,30 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("obfuscate: --stdout-only and --output-dir cannot be used together.")
     sql_text, input_path = _read_sql_source(args.sql_file)
     input_reference = input_path if input_path is not None else Path("stdin.sql")
-    result = obfuscate_sql_with_metadata(
-        sql_text,
-        dialect=args.dialect,
-        seed=args.seed,
-        strict_go=args.strict_go,
-        pretty=args.pretty,
-        redact_literals=args.redact_literals,
-        strip_comments=args.strip_comments,
-        redaction_mode=args.redaction_mode,
-        redaction_policy=args.redaction_policy,
-        sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
-    )
-    output_sql = result.output_sql
+    try:
+        prepared = prepare_workspace(
+            sql_text,
+            input_name=input_reference.name,
+            options=ObfuscationOptions(
+                dialect=args.dialect,
+                seed=args.seed,
+                strict_go=args.strict_go,
+                pretty=args.pretty,
+                redact_literals=args.redact_literals,
+                strip_comments=args.strip_comments,
+                redaction_mode=args.redaction_mode,
+                redaction_policy=args.redaction_policy,
+                sensitive_columns=frozenset(
+                    _parse_sensitive_columns(args.redaction_sensitive_columns)
+                ),
+                llm_safe=bool(args.llm_safe),
+            ),
+        )
+    except LlmSafetyError as exc:
+        prepared = exc.prepared
+    snapshot = prepared.snapshot
+    output_sql = snapshot.obfuscated_sql
     llm_instructions_text = _read_optional_template(args.instruction_template)
-    llm_workflow_report = _build_llm_workflow_report(
-        obfuscation_summary=result.obfuscation_report or {},
-        llm_safe_requested=bool(args.llm_safe),
-        privacy_summary=result.privacy_summary,
-    )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
@@ -510,20 +516,23 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         input_path=input_reference,
         original_sql=sql_text,
         obfuscated_sql=output_sql,
-        mapping_payload=result.mapping_payload,
-        context_payload=result.context_payload,
-        llm_instructions_text=llm_instructions_text,
-        redaction_payload=result.redaction_payload,
-        llm_workflow_report_payload=llm_workflow_report,
-        privacy_summary_payload=result.privacy_summary,
+        mapping_payload=snapshot.mapping_payload,
+        context_payload=snapshot.context_payload,
+        llm_instructions_text=(
+            llm_instructions_text
+            if llm_instructions_text is not None
+            else prepared.instructions_text
+        ),
+        redaction_payload=snapshot.redaction_payload,
+        llm_workflow_report_payload=snapshot.llm_workflow_report,
+        privacy_summary_payload=snapshot.privacy_summary,
     )
     load_mapping_payload(workspace_path / "mapping.json")
     load_context_payload(workspace_path / "context.json")
     validate_workspace_integrity(workspace_path)
-    _enforce_or_warn_llm_safety(
-        obfuscation_summary=result.obfuscation_report or {},
+    _render_llm_safety_decision(
+        safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
-        privacy_summary=result.privacy_summary,
     )
 
     output_path = _resolve_output_path_for_input(
@@ -630,6 +639,29 @@ def _summarize_llm_safe_findings(findings: list[str]) -> str:
     return f"{findings[0]} {findings[1]} ({len(findings) - 2} more finding(s) in reports/privacy_summary.json)."
 
 
+def _render_llm_safety_decision(
+    *,
+    safety: LlmSafetyDecision,
+    llm_safe_requested: bool,
+) -> None:
+    findings = [*safety.blockers, *safety.warnings]
+    if not findings:
+        return
+    detail = _summarize_llm_safe_findings(findings)
+    if llm_safe_requested and safety.blockers:
+        raise WorkspaceError(
+            "LLM-safe validation failed: "
+            f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
+            "or rerun without --llm-safe for expert mode."
+        )
+    print(
+        "Warning: "
+        f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
+        "before sharing with an external LLM. Use --llm-safe to fail closed.",
+        file=sys.stderr,
+    )
+
+
 def _build_llm_workflow_report(
     *,
     obfuscation_summary: dict,
@@ -692,21 +724,13 @@ def _enforce_or_warn_llm_safety(
         obfuscation_summary=obfuscation_summary,
         privacy_summary=privacy_summary,
     )
-    findings = [*blockers, *warnings]
-    if not findings:
-        return
-    detail = _summarize_llm_safe_findings(findings)
-    if llm_safe_requested and blockers:
-        raise WorkspaceError(
-            "LLM-safe validation failed: "
-            f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
-            "or rerun without --llm-safe for expert mode."
-        )
-    print(
-        "Warning: "
-        f"{detail} Review reports/privacy_summary.json and reports/llm_workflow_report.json "
-        "before sharing with an external LLM. Use --llm-safe to fail closed.",
-        file=sys.stderr,
+    _render_llm_safety_decision(
+        safety=LlmSafetyDecision(
+            approved=not blockers,
+            blockers=tuple(blockers),
+            warnings=tuple(warnings),
+        ),
+        llm_safe_requested=llm_safe_requested,
     )
 
 

@@ -166,8 +166,8 @@ def save_workspace_artifacts(
         workspace_path / "llm_instructions.md",
         llm_instructions_text
         if llm_instructions_text is not None
-        else _default_llm_instructions(
-            input_path=input_path,
+        else build_default_llm_instructions(
+            input_name=input_path.name,
             dialect=context_payload.get("dialect", "tsql"),
             statement_anchors=context_payload.get("statement_anchors"),
         ),
@@ -807,9 +807,9 @@ def _statement_replacement_instruction_lines(statement_anchors: list[dict[str, A
     )
 
 
-def _default_llm_instructions(
+def build_default_llm_instructions(
     *,
-    input_path: Path,
+    input_name: str,
     dialect: str,
     statement_anchors: list[dict[str, Any]] | None = None,
 ) -> str:
@@ -817,7 +817,7 @@ def _default_llm_instructions(
         "# LLM Instructions for Obfuscated SQL\n\n"
         "You are editing an obfuscated SQL script. The output will be de-obfuscated afterward.\n\n"
         "## Input Context\n"
-        f"- Original input file: `{input_path.name}`\n"
+        f"- Original input file: `{input_name}`\n"
         f"- SQL dialect: `{dialect}`\n\n"
         + _statement_anchor_instruction_lines(statement_anchors)
         + _statement_replacement_instruction_lines(statement_anchors)

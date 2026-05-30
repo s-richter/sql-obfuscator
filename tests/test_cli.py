@@ -935,6 +935,22 @@ def test_cli_uses_custom_instruction_template(tmp_path: Path, capsys):
     assert instructions == "# Custom\nUse this exact template.\n"
 
 
+def test_cli_preserves_empty_custom_instruction_template(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    template = tmp_path / "my_template.md"
+    template.write_text("", encoding="utf-8")
+
+    rc = main(["obfuscate", str(sql_file), "--instruction-template", str(template)])
+    capsys.readouterr()
+
+    assert rc == 0
+    instructions = (tmp_path / "input.obf" / "llm_instructions.md").read_text(
+        encoding="utf-8"
+    )
+    assert instructions == ""
+
+
 def test_cli_workspace_info_subcommand(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
