@@ -201,6 +201,35 @@ script.obf/
     `-- translation_report.json         # after translate --workspace ...
 ```
 
+## In-Process Workflow API
+
+Host adapters can invoke the application workflow directly without shelling out to the CLI:
+
+```python
+from sql_obfuscator.workflow import (
+    ObfuscationOptions,
+    analyze_deobfuscation,
+    apply_statement_replacements,
+    prepare_workspace,
+    require_safe_deobfuscation,
+    verify_roundtrip,
+)
+from sql_obfuscator.workspace import load_workspace_snapshot, save_workspace_snapshot
+```
+
+The workflow module accepts SQL text, structured options, structured edit payloads, and
+`WorkspaceSnapshot` values. It returns structured results and safety findings without
+reading files, printing output, or depending on HTTP concepts. The CLI is one host adapter:
+it reads local input, persists artifacts, renders messages, and maps findings to exit codes.
+
+`save_workspace_snapshot()` and `load_workspace_snapshot()` provide the local filesystem
+persistence implementation. They preserve the existing workspace layout and integrity
+checks while keeping metadata path composition out of workflow callers.
+
+A future website adapter should use the same workflow operations. Tenant-scoped durable
+storage, opaque workspace IDs, HTTP routes, and job-runner resource policy are intentionally
+deferred until a website host is implemented.
+
 ## Integrity Protection
 
 Workspace integrity is enforced with SHA-256 checksums in `integrity.json`.

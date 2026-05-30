@@ -17,7 +17,6 @@ from .workflow import (
     LlmSafetyDecision,
     LlmSafetyError,
     ObfuscationOptions,
-    WorkspaceSnapshot,
     analyze_deobfuscation,
     apply_statement_replacements,
     prepare_workspace,
@@ -27,16 +26,15 @@ from .workflow import (
 from .workspace import (
     default_workspace_path,
     load_context_payload,
-    load_llm_workflow_report,
     load_mapping_payload,
     load_privacy_summary_report,
-    load_redaction_payload,
+    load_workspace_snapshot,
     save_deobfuscation_artifacts,
     save_llm_edit_application_report,
-    save_llm_workflow_report,
+    save_llm_workflow_report_if_present,
     save_roundtrip_reports,
     save_translation_artifacts,
-    save_workspace_artifacts,
+    save_workspace_snapshot,
     validate_workspace_integrity,
 )
 
@@ -474,25 +472,18 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     llm_instructions_text = _read_optional_template(args.instruction_template)
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
-    save_workspace_artifacts(
+    save_workspace_snapshot(
         workspace_path=workspace_path,
         input_path=input_reference,
         original_sql=sql_text,
-        obfuscated_sql=output_sql,
-        mapping_payload=snapshot.mapping_payload,
-        context_payload=snapshot.context_payload,
-        llm_instructions_text=(
+        snapshot=snapshot,
+        instructions_text=(
             llm_instructions_text
             if llm_instructions_text is not None
             else prepared.instructions_text
         ),
-        redaction_payload=snapshot.redaction_payload,
-        llm_workflow_report_payload=snapshot.llm_workflow_report,
-        privacy_summary_payload=snapshot.privacy_summary,
     )
-    load_mapping_payload(workspace_path / "mapping.json")
-    load_context_payload(workspace_path / "context.json")
-    validate_workspace_integrity(workspace_path)
+    load_workspace_snapshot(workspace_path)
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -511,41 +502,12 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_workspace_snapshot(workspace_path: Path) -> WorkspaceSnapshot:
-    validate_workspace_integrity(workspace_path)
-    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
-    context_payload = load_context_payload(workspace_path / "context.json")
-    redaction_path = workspace_path / "redaction.json"
-    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
-    llm_workflow_report_path = workspace_path / "reports" / "llm_workflow_report.json"
-    return WorkspaceSnapshot(
-        obfuscated_sql=_read_sql_file(workspace_path / "obfuscated.sql"),
-        mapping_payload=mapping_payload,
-        context_payload=context_payload,
-        redaction_payload=(
-            load_redaction_payload(redaction_path)
-            if redaction_path.exists()
-            else None
-        ),
-        privacy_summary=(
-            load_privacy_summary_report(privacy_summary_path)
-            if privacy_summary_path.exists()
-            else {}
-        ),
-        llm_workflow_report=(
-            load_llm_workflow_report(llm_workflow_report_path)
-            if llm_workflow_report_path.exists()
-            else {}
-        ),
-    )
-
-
 def _deobfuscate_pipeline(
     *,
     workspace_path: Path,
     input_path: Path,
 ) -> DeobfuscationResult:
-    snapshot = _load_workspace_snapshot(workspace_path)
+    snapshot = load_workspace_snapshot(workspace_path)
     edited_sql = _read_sql_file(input_path)
     return analyze_deobfuscation(snapshot, edited_sql)
 
@@ -583,23 +545,10 @@ def _render_llm_safety_decision(
     )
 
 
-def _save_updated_llm_workflow_report(
-    *,
-    workspace_path: Path,
-    report_payload: dict,
-) -> None:
-    report_path = workspace_path / "reports" / "llm_workflow_report.json"
-    if report_path.exists():
-        save_llm_workflow_report(
-            workspace_path=workspace_path,
-            report_payload=report_payload,
-        )
-
-
 def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     edits_path = Path(args.edits)
-    snapshot = _load_workspace_snapshot(workspace_path)
+    snapshot = load_workspace_snapshot(workspace_path)
     edits_payload = load_llm_edits_payload(edits_path)
     result = apply_statement_replacements(snapshot, edits_payload)
     report = result.report
@@ -673,7 +622,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=result.deobfuscated_sql,
         report_payload=report,
     )
-    _save_updated_llm_workflow_report(
+    save_llm_workflow_report_if_present(
         workspace_path=workspace_path,
         report_payload=result.llm_workflow_report,
     )
@@ -724,7 +673,7 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=result.deobfuscated_sql,
         report_payload=report,
     )
-    _save_updated_llm_workflow_report(
+    save_llm_workflow_report_if_present(
         workspace_path=workspace_path,
         report_payload=result.llm_workflow_report,
     )
@@ -766,25 +715,18 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     llm_instructions_text = _read_optional_template(args.instruction_template)
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
-    save_workspace_artifacts(
+    save_workspace_snapshot(
         workspace_path=workspace_path,
         input_path=input_reference,
         original_sql=original_sql,
-        obfuscated_sql=snapshot.obfuscated_sql,
-        mapping_payload=snapshot.mapping_payload,
-        context_payload=snapshot.context_payload,
-        llm_instructions_text=(
+        snapshot=snapshot,
+        instructions_text=(
             llm_instructions_text
             if llm_instructions_text is not None
             else prepared.instructions_text
         ),
-        redaction_payload=snapshot.redaction_payload,
-        llm_workflow_report_payload=snapshot.llm_workflow_report,
-        privacy_summary_payload=snapshot.privacy_summary,
     )
-    load_mapping_payload(workspace_path / "mapping.json")
-    load_context_payload(workspace_path / "context.json")
-    validate_workspace_integrity(workspace_path)
+    load_workspace_snapshot(workspace_path)
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -807,7 +749,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         deobfuscated_sql=deobfuscation.deobfuscated_sql,
         report_payload=deobfuscation.report,
     )
-    _save_updated_llm_workflow_report(
+    save_llm_workflow_report_if_present(
         workspace_path=workspace_path,
         report_payload=deobfuscation.llm_workflow_report,
     )

@@ -7,13 +7,18 @@ from pathlib import Path
 import pytest
 
 from sql_obfuscator.errors import WorkspaceError
+from sql_obfuscator.workflow import ObfuscationOptions, prepare_workspace
 from sql_obfuscator.workspace import (
+    WorkspaceSnapshot,
     default_workspace_path,
+    load_workspace_snapshot,
     load_context_payload,
     load_llm_workflow_report,
     load_mapping_payload,
     load_privacy_summary_report,
     load_redaction_payload,
+    save_llm_workflow_report_if_present,
+    save_workspace_snapshot,
     save_workspace_artifacts,
     save_translation_artifacts,
 )
@@ -23,6 +28,151 @@ def test_default_workspace_path_uses_stem(tmp_path: Path):
     input_path = tmp_path / "sample.sql"
     workspace = default_workspace_path(input_path)
     assert workspace == tmp_path / "sample.obf"
+
+
+def test_save_and_load_workspace_snapshot_preserves_prepared_workspace(tmp_path: Path):
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+        options=ObfuscationOptions(seed=42),
+    )
+
+    save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+        instructions_text=prepared.instructions_text,
+    )
+    loaded = load_workspace_snapshot(workspace_path)
+
+    assert loaded == prepared.snapshot
+    assert (workspace_path / "llm_instructions.md").read_text(encoding="utf-8") == prepared.instructions_text
+    assert (workspace_path / "reports" / "llm_workflow_report.json").exists()
+    assert (workspace_path / "reports" / "privacy_summary.json").exists()
+
+
+def test_save_and_load_workspace_snapshot_preserves_reversible_redaction(tmp_path: Path):
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users WHERE Status = 'secret';",
+        input_name=input_path.name,
+        options=ObfuscationOptions(
+            redact_literals=True,
+            redaction_mode="reversible",
+        ),
+    )
+
+    save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+        instructions_text=prepared.instructions_text,
+    )
+    loaded = load_workspace_snapshot(workspace_path)
+
+    assert loaded.redaction_payload == prepared.snapshot.redaction_payload
+    assert (workspace_path / "redaction.json").exists()
+    assert (workspace_path / "redaction.schema.json").exists()
+
+
+def test_load_workspace_snapshot_rejects_integrity_tampering(tmp_path: Path):
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+    )
+    save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+    )
+    mapping_path = workspace_path / "mapping.json"
+    mapping_path.write_text(
+        mapping_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="Integrity check failed"):
+        load_workspace_snapshot(workspace_path)
+
+
+def test_save_llm_workflow_report_if_present_updates_only_existing_report(tmp_path: Path):
+    workspace_path = tmp_path / "sample.obf"
+    workspace_path.mkdir()
+    report_payload = {
+        "schema_version": 1,
+        "llm_safe_requested": False,
+        "llm_safe_approved": True,
+        "obfuscation_summary": {},
+        "deobfuscation_summary": {"unknown_count": 0},
+        "recommendations": [],
+    }
+
+    save_llm_workflow_report_if_present(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+    )
+    assert (workspace_path / "reports" / "llm_workflow_report.json").exists() is False
+
+    input_path = tmp_path / "sample.sql"
+    prepared = prepare_workspace("SELECT UserId FROM Users;", input_name=input_path.name)
+    save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+    )
+    save_llm_workflow_report_if_present(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+    )
+
+    assert load_llm_workflow_report(
+        workspace_path / "reports" / "llm_workflow_report.json"
+    ) == report_payload
+
+
+def test_save_workspace_snapshot_preserves_absent_optional_reports(tmp_path: Path):
+    workspace_path = tmp_path / "sample.obf"
+    snapshot = WorkspaceSnapshot(
+        obfuscated_sql="SELECT 1;",
+        mapping_payload={
+            "schema_version": 1,
+            "entries": [],
+            "forward_index": {},
+            "reverse_index": {},
+        },
+        context_payload={
+            "schema_version": 1,
+            "dialect": "tsql",
+            "seed": None,
+            "pretty": True,
+            "batch_count": 1,
+            "statement_count": 1,
+            "mapping_entry_count": 0,
+        },
+        redaction_payload=None,
+        privacy_summary={},
+        llm_workflow_report={},
+    )
+
+    save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=tmp_path / "sample.sql",
+        original_sql="SELECT 1;",
+        snapshot=snapshot,
+    )
+
+    assert (workspace_path / "reports" / "privacy_summary.json").exists() is False
+    assert (workspace_path / "reports" / "llm_workflow_report.json").exists() is False
+    assert load_workspace_snapshot(workspace_path) == snapshot
 
 
 def test_load_mapping_payload_rejects_invalid_schema(tmp_path: Path):

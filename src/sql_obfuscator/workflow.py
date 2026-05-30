@@ -13,7 +13,7 @@ from .llm_edits import apply_llm_statement_replacements
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
-from .workspace import build_default_llm_instructions
+from .workspace import WorkspaceSnapshot, build_default_llm_instructions
 
 
 @dataclass(frozen=True)
@@ -28,16 +28,6 @@ class ObfuscationOptions:
     redaction_policy: str = "all"
     sensitive_columns: frozenset[str] = field(default_factory=frozenset)
     llm_safe: bool = False
-
-
-@dataclass(frozen=True)
-class WorkspaceSnapshot:
-    obfuscated_sql: str
-    mapping_payload: dict[str, Any]
-    context_payload: dict[str, Any]
-    redaction_payload: dict[str, Any] | None
-    privacy_summary: dict[str, Any]
-    llm_workflow_report: dict[str, Any]
 
 
 @dataclass(frozen=True)

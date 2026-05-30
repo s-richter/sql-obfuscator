@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -138,8 +139,72 @@ INTEGRITY_TRACKED_FILES = [
 ]
 
 
+@dataclass(frozen=True)
+class WorkspaceSnapshot:
+    obfuscated_sql: str
+    mapping_payload: dict[str, Any]
+    context_payload: dict[str, Any]
+    redaction_payload: dict[str, Any] | None
+    privacy_summary: dict[str, Any]
+    llm_workflow_report: dict[str, Any]
+
+
 def default_workspace_path(input_path: Path) -> Path:
     return input_path.with_name(f"{input_path.stem}.obf")
+
+
+def save_workspace_snapshot(
+    *,
+    workspace_path: Path,
+    input_path: Path,
+    original_sql: str,
+    snapshot: WorkspaceSnapshot,
+    instructions_text: str | None = None,
+) -> None:
+    save_workspace_artifacts(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=original_sql,
+        obfuscated_sql=snapshot.obfuscated_sql,
+        mapping_payload=snapshot.mapping_payload,
+        context_payload=snapshot.context_payload,
+        llm_instructions_text=instructions_text,
+        redaction_payload=snapshot.redaction_payload,
+        llm_workflow_report_payload=snapshot.llm_workflow_report or None,
+        privacy_summary_payload=snapshot.privacy_summary or None,
+    )
+
+
+def load_workspace_snapshot(workspace_path: Path) -> WorkspaceSnapshot:
+    validate_workspace_integrity(workspace_path)
+    redaction_path = workspace_path / "redaction.json"
+    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
+    llm_workflow_report_path = workspace_path / "reports" / "llm_workflow_report.json"
+    context_payload = load_context_payload(workspace_path / "context.json")
+    return WorkspaceSnapshot(
+        obfuscated_sql=_read_text(workspace_path / "obfuscated.sql"),
+        mapping_payload=load_mapping_payload(workspace_path / "mapping.json"),
+        context_payload={
+            key: value
+            for key, value in context_payload.items()
+            if key != "input_file"
+        },
+        redaction_payload=(
+            load_redaction_payload(redaction_path)
+            if redaction_path.exists()
+            else None
+        ),
+        privacy_summary=(
+            load_privacy_summary_report(privacy_summary_path)
+            if privacy_summary_path.exists()
+            else {}
+        ),
+        llm_workflow_report=(
+            load_llm_workflow_report(llm_workflow_report_path)
+            if llm_workflow_report_path.exists()
+            else {}
+        ),
+    )
 
 
 def save_workspace_artifacts(
@@ -372,6 +437,18 @@ def save_llm_workflow_report(
     _write_json(reports_path / "llm_workflow_report.json", report_payload)
 
 
+def save_llm_workflow_report_if_present(
+    *,
+    workspace_path: Path,
+    report_payload: dict[str, Any],
+) -> None:
+    if (workspace_path / "reports" / "llm_workflow_report.json").exists():
+        save_llm_workflow_report(
+            workspace_path=workspace_path,
+            report_payload=report_payload,
+        )
+
+
 def save_llm_edit_application_report(
     *,
     workspace_path: Path,
@@ -420,6 +497,13 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         )
     except OSError as exc:
         raise WorkspaceError(f"Unable to write workspace file: {path}") from exc
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise WorkspaceError(f"Unable to read workspace file: {path}") from exc
 
 
 def _remove_if_exists(path: Path) -> None:
