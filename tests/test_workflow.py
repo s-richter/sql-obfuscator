@@ -176,6 +176,34 @@ def test_analyze_deobfuscation_reports_unknown_identifiers_separately_from_low_c
     assert result.safety.low_confidence_mapping_count == 0
 
 
+def test_analyze_deobfuscation_reports_ambiguous_identifiers_separately_from_other_findings():
+    prepared = prepare_workspace(
+        "SELECT UserId AS Shared FROM Users;",
+        input_name="input.sql",
+    )
+    alias_entry = next(
+        entry
+        for entry in prepared.snapshot.mapping_payload["entries"]
+        if entry.get("namespace") == "column_alias"
+    )
+
+    result = analyze_deobfuscation(
+        prepared.snapshot,
+        f"SELECT {alias_entry['obfuscated_lexeme']};",
+    )
+
+    assert result.safety.has_unresolved is True
+    assert result.safety.has_low_confidence is False
+    assert result.safety.unknown_identifier_count == 0
+    assert result.safety.ambiguous_identifier_count == 1
+    assert result.safety.unknown_placeholder_count == 0
+    assert result.safety.missing_placeholder_count == 0
+    assert result.safety.low_confidence_mapping_count == 0
+    with pytest.raises(DeobfuscationSafetyError, match="unresolved mappings"):
+        require_safe_deobfuscation(result)
+    require_safe_deobfuscation(result, allow_unresolved=True)
+
+
 def test_require_safe_deobfuscation_blocks_unresolved_mappings_unless_overridden():
     prepared = prepare_workspace(
         "SELECT UserId FROM Users;",
