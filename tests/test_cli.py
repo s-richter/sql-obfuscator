@@ -1434,6 +1434,21 @@ def test_cli_obfuscate_warns_when_fallback_preserved_statements_exist(tmp_path: 
     assert "fallback_preserved_statements" in privacy_report["blocking_identifier_classes"]
 
 
+def test_cli_roundtrip_warns_when_fallback_preserved_statements_exist(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["roundtrip", str(sql_file), "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Warning:" in captured.err
+    assert "fallback/raw passthrough" in captured.err
+    assert (workspace / "deobfuscated.sql").exists()
+    assert (workspace / "reports" / "roundtrip_report.json").exists()
+
+
 def test_cli_obfuscate_llm_safe_blocks_fallback_preserved_statements(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
@@ -1451,6 +1466,29 @@ def test_cli_obfuscate_llm_safe_blocks_fallback_preserved_statements(tmp_path: P
     assert report["llm_safe_requested"] is True
     assert report["llm_safe_approved"] is False
     assert report["obfuscation_summary"]["fallback_preserved_statement_count"] == 1
+
+
+def test_cli_roundtrip_llm_safe_blocks_fallback_preserved_statements(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(
+        [
+            "roundtrip",
+            str(sql_file),
+            "--workspace",
+            str(workspace),
+            "--llm-safe",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "LLM-safe validation failed" in captured.err
+    assert (workspace / "obfuscated.sql").exists()
+    assert (workspace / "deobfuscated.sql").exists() is False
+    assert (workspace / "reports" / "roundtrip_report.json").exists() is False
 
 
 def test_cli_obfuscate_llm_safe_blocks_visible_local_variables(tmp_path: Path, capsys):

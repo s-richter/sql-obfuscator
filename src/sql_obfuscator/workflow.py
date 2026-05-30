@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlglot.errors import ParseError
+
 from .deobfuscation import deobfuscate_sql_with_report
-from .errors import WorkspaceError
+from .dialects_factory import get_dialect_profile
+from .errors import ParseScriptError, WorkspaceError
 from .llm_edits import apply_llm_statement_replacements
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
+from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .workspace import build_default_llm_instructions
 
 
@@ -74,6 +79,24 @@ class DeobfuscationResult:
     report: dict[str, Any]
     safety: DeobfuscationSafetyDecision
     llm_workflow_report: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class RoundtripArtifacts:
+    diff_text: str
+    original_pretty_sql: str
+    deobfuscated_pretty_sql: str
+    normalized_diff_text: str
+
+
+@dataclass(frozen=True)
+class RoundtripResult:
+    prepared: PreparedWorkspace
+    deobfuscation: DeobfuscationResult
+    exact_match: bool
+    normalized_exact_match: bool
+    report: dict[str, Any]
+    artifacts: RoundtripArtifacts
 
 
 class LlmSafetyError(WorkspaceError):
@@ -221,6 +244,120 @@ def require_safe_deobfuscation(
         raise DeobfuscationSafetyError(result, reason="unresolved")
     if result.safety.has_low_confidence and not allow_low_confidence:
         raise DeobfuscationSafetyError(result, reason="low_confidence")
+
+
+def verify_roundtrip(
+    sql: str,
+    *,
+    input_name: str,
+    options: ObfuscationOptions = ObfuscationOptions(),
+) -> RoundtripResult:
+    prepared = prepare_workspace(
+        sql,
+        input_name=input_name,
+        options=options,
+    )
+    deobfuscation = analyze_deobfuscation(
+        prepared.snapshot,
+        prepared.snapshot.obfuscated_sql,
+    )
+    dialect = str(prepared.snapshot.context_payload.get("dialect", "tsql"))
+    try:
+        original_pretty_sql = _normalize_sql_for_comparison(sql, dialect=dialect)
+        deobfuscated_pretty_sql = _normalize_sql_for_comparison(
+            deobfuscation.deobfuscated_sql,
+            dialect=dialect,
+        )
+    except ParseError as exc:
+        raise ParseScriptError(
+            f"Parse error while building normalized roundtrip comparison: {exc}"
+        ) from exc
+    normalized_diff_lines = list(
+        difflib.unified_diff(
+            original_pretty_sql.splitlines(keepends=True),
+            deobfuscated_pretty_sql.splitlines(keepends=True),
+            fromfile="reports/original_pretty.sql",
+            tofile="reports/deobfuscated_pretty.sql",
+        )
+    )
+    diff_text = _build_roundtrip_diff_text(
+        original_sql=sql,
+        deobfuscated_sql=deobfuscation.deobfuscated_sql,
+        original_pretty_sql=original_pretty_sql,
+        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
+    )
+    exact_match = sql == deobfuscation.deobfuscated_sql
+    normalized_exact_match = original_pretty_sql == deobfuscated_pretty_sql
+    report = {
+        "schema_version": 1,
+        "exact_match": exact_match,
+        "original_char_count": len(sql),
+        "deobfuscated_char_count": len(deobfuscation.deobfuscated_sql),
+        "diff_line_count": len(diff_text.splitlines()),
+        "normalized_exact_match": normalized_exact_match,
+        "normalized_original_char_count": len(original_pretty_sql),
+        "normalized_deobfuscated_char_count": len(deobfuscated_pretty_sql),
+        "normalized_diff_line_count": len(normalized_diff_lines),
+        "deobfuscation_report": deobfuscation.report,
+    }
+    return RoundtripResult(
+        prepared=prepared,
+        deobfuscation=deobfuscation,
+        exact_match=exact_match,
+        normalized_exact_match=normalized_exact_match,
+        report=report,
+        artifacts=RoundtripArtifacts(
+            diff_text=diff_text,
+            original_pretty_sql=original_pretty_sql,
+            deobfuscated_pretty_sql=deobfuscated_pretty_sql,
+            normalized_diff_text="".join(normalized_diff_lines),
+        ),
+    )
+
+
+def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
+    profile = get_dialect_profile(dialect)
+    normalized_batches: list[str] = []
+    for batch in profile.split_batches(sql_text):
+        if not batch.strip():
+            normalized_batches.append(batch)
+            continue
+        statements = parse_sql(batch, dialect=dialect)
+        normalized_batches.append(
+            join_emitted_statements(
+                [
+                    emit_sql(statement, dialect=dialect, pretty=True, strip_comments=True)
+                    for statement in statements
+                ]
+            )
+        )
+    return profile.join_batches(normalized_batches)
+
+
+def _build_roundtrip_diff_text(
+    *,
+    original_sql: str,
+    deobfuscated_sql: str,
+    original_pretty_sql: str,
+    deobfuscated_pretty_sql: str,
+) -> str:
+    raw_diff = "".join(
+        difflib.unified_diff(
+            original_sql.splitlines(keepends=True),
+            deobfuscated_sql.splitlines(keepends=True),
+            fromfile="original.sql",
+            tofile="deobfuscated.sql",
+        )
+    )
+    if original_sql == deobfuscated_sql:
+        return raw_diff
+    if original_pretty_sql == deobfuscated_pretty_sql:
+        return (
+            "No semantic diff detected after normalized comparison.\n"
+            "Raw SQL differs only by non-semantic formatting/comment changes.\n"
+            "See reports/original_pretty.sql and reports/deobfuscated_pretty.sql for the normalized pair.\n"
+        )
+    return raw_diff
 
 
 def _normalized_sensitive_columns(sensitive_columns: frozenset[str]) -> set[str]:

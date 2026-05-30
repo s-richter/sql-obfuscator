@@ -9,6 +9,7 @@ from sql_obfuscator.workflow import (
     apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
+    verify_roundtrip,
 )
 
 
@@ -235,6 +236,56 @@ def test_apply_statement_replacements_rejects_multiple_sql_statements():
                 ],
             },
         )
+
+
+def test_verify_roundtrip_returns_structured_in_memory_result(capsys):
+    result = verify_roundtrip(
+        "SELECT UserId FROM Users",
+        input_name="input.sql",
+        options=ObfuscationOptions(pretty=False),
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert result.deobfuscation.deobfuscated_sql == "SELECT UserId FROM Users"
+    assert result.exact_match is True
+    assert result.normalized_exact_match is True
+    assert result.report["exact_match"] is True
+    assert result.report["normalized_exact_match"] is True
+    assert result.report["deobfuscation_report"] is result.deobfuscation.report
+    assert result.artifacts.diff_text == ""
+    assert result.artifacts.normalized_diff_text == ""
+
+
+def test_verify_roundtrip_summarizes_non_semantic_raw_diff():
+    result = verify_roundtrip(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    assert result.exact_match is False
+    assert result.normalized_exact_match is True
+    assert "No semantic diff detected after normalized comparison." in result.artifacts.diff_text
+    assert result.artifacts.normalized_diff_text == ""
+
+
+def test_verify_roundtrip_restores_reversible_redaction_literals():
+    result = verify_roundtrip(
+        "SELECT UserId FROM Users WHERE Status = 'secret' AND Score = 99;",
+        input_name="input.sql",
+        options=ObfuscationOptions(
+            pretty=False,
+            redact_literals=True,
+            redaction_mode="reversible",
+        ),
+    )
+
+    assert "secret" in result.deobfuscation.deobfuscated_sql
+    assert "99" in result.deobfuscation.deobfuscated_sql
+    assert result.deobfuscation.report["redaction"]["unknown_placeholder_count"] == 0
+    assert result.deobfuscation.report["redaction"]["missing_placeholder_count"] == 0
+    assert result.deobfuscation.safety.has_unresolved is False
 
 
 def test_analyze_deobfuscation_restores_identifiers_in_memory(capsys):

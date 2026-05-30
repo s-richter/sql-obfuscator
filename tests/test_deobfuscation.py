@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sql_obfuscator.cli import (
+from sql_obfuscator.cli import _summarize_sqlglot_warnings
+from sql_obfuscator.workflow import (
     _build_roundtrip_diff_text,
     _normalize_sql_for_comparison,
-    _summarize_sqlglot_warnings,
 )
 from sql_obfuscator.deobfuscation import deobfuscate_sql_with_report
 from sql_obfuscator.pipeline import obfuscate_sql_with_metadata

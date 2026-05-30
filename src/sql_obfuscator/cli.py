@@ -1,22 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import logging
 import sys
 from dataclasses import asdict
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlglot.errors import ParseError
-
-from .dialects_factory import get_dialect_profile, supported_dialects
-from .deobfuscation import deobfuscate_sql_with_report
+from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
-from .pipeline import obfuscate_sql_with_metadata
-from .redaction import restore_reversible_redaction
-from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .translation import translate_sql_with_report
 from .workflow import (
     DeobfuscationResult,
@@ -29,6 +22,7 @@ from .workflow import (
     apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
+    verify_roundtrip,
 )
 from .workspace import (
     default_workspace_path,
@@ -448,48 +442,6 @@ def _read_optional_template(path: str | None) -> str | None:
         raise InputFileError(f"Unable to read instruction template: {template_path}") from exc
 
 
-def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
-    profile = get_dialect_profile(dialect)
-    normalized_batches: list[str] = []
-    for batch in profile.split_batches(sql_text):
-        if not batch.strip():
-            normalized_batches.append(batch)
-            continue
-        statements = parse_sql(batch, dialect=dialect)
-        normalized_batches.append(
-            join_emitted_statements(
-                [emit_sql(stmt, dialect=dialect, pretty=True, strip_comments=True) for stmt in statements]
-            )
-        )
-    return profile.join_batches(normalized_batches)
-
-
-def _build_roundtrip_diff_text(
-    *,
-    original_sql: str,
-    deobfuscated_sql: str,
-    original_pretty_sql: str,
-    deobfuscated_pretty_sql: str,
-) -> str:
-    raw_diff = "".join(
-        difflib.unified_diff(
-            original_sql.splitlines(keepends=True),
-            deobfuscated_sql.splitlines(keepends=True),
-            fromfile="original.sql",
-            tofile="deobfuscated.sql",
-        )
-    )
-    if original_sql == deobfuscated_sql:
-        return raw_diff
-    if original_pretty_sql == deobfuscated_pretty_sql:
-        return (
-            "No semantic diff detected after normalized comparison.\n"
-            "Raw SQL differs only by non-semantic formatting/comment changes.\n"
-            "See reports/original_pretty.sql and reports/deobfuscated_pretty.sql for the normalized pair.\n"
-        )
-    return raw_diff
-
-
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
     _validate_redaction_args(args)
     if args.stdout_only and args.output_dir:
@@ -598,44 +550,6 @@ def _deobfuscate_pipeline(
     return analyze_deobfuscation(snapshot, edited_sql)
 
 
-def _build_deobfuscation_summary(report: dict) -> dict:
-    redaction_report = report.get("redaction")
-    return {
-        "mapped_identifiers": report.get("mapped_identifiers", 0),
-        "unknown_count": report.get("unknown_count", 0),
-        "ambiguous_count": report.get("ambiguous_count", 0),
-        "low_confidence_count": report.get("low_confidence_count", 0),
-        "matched_statement_anchor_count": report.get("matched_statement_anchor_count", 0),
-        "unmatched_statement_anchor_count": report.get("unmatched_statement_anchor_count", 0),
-        "redaction_unknown_placeholder_count": (
-            redaction_report.get("unknown_placeholder_count", 0)
-            if isinstance(redaction_report, dict)
-            else 0
-        ),
-        "redaction_missing_placeholder_count": (
-            redaction_report.get("missing_placeholder_count", 0)
-            if isinstance(redaction_report, dict)
-            else 0
-        ),
-    }
-
-
-def _build_llm_safe_findings(*, obfuscation_summary: dict, privacy_summary: dict | None) -> tuple[list[str], list[str]]:
-    blockers: list[str] = []
-    warnings: list[str] = []
-    if isinstance(privacy_summary, dict):
-        blockers = [item for item in privacy_summary.get("blockers", []) if isinstance(item, str)]
-        warnings = [item for item in privacy_summary.get("warnings", []) if isinstance(item, str)]
-    if not blockers and obfuscation_summary.get("fallback_preserved_statement_count", 0) > 0:
-        fallback_preserved = int(obfuscation_summary.get("fallback_preserved_statement_count", 0))
-        noun = "statement" if fallback_preserved == 1 else "statements"
-        verb = "was" if fallback_preserved == 1 else "were"
-        blockers.append(
-            f"{fallback_preserved} {noun} {verb} preserved via parser compatibility fallback/raw passthrough and may still expose identifiers or literals."
-        )
-    return blockers, warnings
-
-
 def _summarize_llm_safe_findings(findings: list[str]) -> str:
     if not findings:
         return ""
@@ -669,58 +583,6 @@ def _render_llm_safety_decision(
     )
 
 
-def _build_llm_workflow_report(
-    *,
-    obfuscation_summary: dict,
-    llm_safe_requested: bool,
-    privacy_summary: dict | None = None,
-    deobfuscation_report: dict | None = None,
-) -> dict:
-    recommendations: list[str] = []
-    if isinstance(privacy_summary, dict):
-        for recommendation in privacy_summary.get("recommendations", []):
-            if isinstance(recommendation, str) and recommendation not in recommendations:
-                recommendations.append(recommendation)
-    if isinstance(deobfuscation_report, dict):
-        for recommendation in deobfuscation_report.get("recommendations", []):
-            if isinstance(recommendation, str) and recommendation not in recommendations:
-                recommendations.append(recommendation)
-    return {
-        "schema_version": 1,
-        "llm_safe_requested": llm_safe_requested,
-        "llm_safe_approved": bool(obfuscation_summary.get("llm_safe_approved", not bool(recommendations))),
-        "obfuscation_summary": obfuscation_summary,
-        "deobfuscation_summary": (
-            _build_deobfuscation_summary(deobfuscation_report)
-            if isinstance(deobfuscation_report, dict)
-            else None
-        ),
-        "recommendations": recommendations,
-    }
-
-
-def _update_llm_workflow_report_with_deobfuscation(*, workspace_path: Path, report: dict) -> None:
-    report_path = workspace_path / "reports" / "llm_workflow_report.json"
-    if not report_path.exists():
-        return
-    existing_report = load_llm_workflow_report(report_path)
-    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
-    privacy_summary = (
-        load_privacy_summary_report(privacy_summary_path)
-        if privacy_summary_path.exists()
-        else None
-    )
-    save_llm_workflow_report(
-        workspace_path=workspace_path,
-        report_payload=_build_llm_workflow_report(
-            obfuscation_summary=existing_report.get("obfuscation_summary", {}),
-            llm_safe_requested=bool(existing_report.get("llm_safe_requested", False)),
-            privacy_summary=privacy_summary,
-            deobfuscation_report=report,
-        ),
-    )
-
-
 def _save_updated_llm_workflow_report(
     *,
     workspace_path: Path,
@@ -732,27 +594,6 @@ def _save_updated_llm_workflow_report(
             workspace_path=workspace_path,
             report_payload=report_payload,
         )
-
-
-def _enforce_or_warn_llm_safety(
-    *,
-    obfuscation_summary: dict,
-    llm_safe_requested: bool,
-    privacy_summary: dict | None = None,
-) -> None:
-    blockers, warnings = _build_llm_safe_findings(
-        obfuscation_summary=obfuscation_summary,
-        privacy_summary=privacy_summary,
-    )
-    _render_llm_safety_decision(
-        safety=LlmSafetyDecision(
-            approved=not blockers,
-            blockers=tuple(blockers),
-            warnings=tuple(warnings),
-        ),
-        llm_safe_requested=llm_safe_requested,
-    )
-
 
 
 def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
@@ -898,48 +739,58 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("roundtrip: --stdout-only and --output-dir cannot be used together.")
     original_sql, input_path = _read_sql_source(args.sql_file)
     input_reference = input_path if input_path is not None else Path("stdin.sql")
-
-    obfuscation = obfuscate_sql_with_metadata(
-        original_sql,
-        dialect=args.dialect,
-        seed=args.seed,
-        strict_go=args.strict_go,
-        pretty=args.pretty,
-        redact_literals=args.redact_literals,
-        strip_comments=args.strip_comments,
-        redaction_mode=args.redaction_mode,
-        redaction_policy=args.redaction_policy,
-        sensitive_columns=_parse_sensitive_columns(args.redaction_sensitive_columns),
-    )
-    obfuscated_sql = obfuscation.output_sql
+    try:
+        result = verify_roundtrip(
+            original_sql,
+            input_name=input_reference.name,
+            options=ObfuscationOptions(
+                dialect=args.dialect,
+                seed=args.seed,
+                strict_go=args.strict_go,
+                pretty=args.pretty,
+                redact_literals=args.redact_literals,
+                strip_comments=args.strip_comments,
+                redaction_mode=args.redaction_mode,
+                redaction_policy=args.redaction_policy,
+                sensitive_columns=frozenset(
+                    _parse_sensitive_columns(args.redaction_sensitive_columns)
+                ),
+                llm_safe=bool(args.llm_safe),
+            ),
+        )
+        prepared = result.prepared
+    except LlmSafetyError as exc:
+        prepared = exc.prepared
+        result = None
+    snapshot = prepared.snapshot
     llm_instructions_text = _read_optional_template(args.instruction_template)
-    llm_workflow_report = _build_llm_workflow_report(
-        obfuscation_summary=obfuscation.obfuscation_report or {},
-        llm_safe_requested=bool(args.llm_safe),
-        privacy_summary=obfuscation.privacy_summary,
-    )
 
     workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
     save_workspace_artifacts(
         workspace_path=workspace_path,
         input_path=input_reference,
         original_sql=original_sql,
-        obfuscated_sql=obfuscated_sql,
-        mapping_payload=obfuscation.mapping_payload,
-        context_payload=obfuscation.context_payload,
-        llm_instructions_text=llm_instructions_text,
-        redaction_payload=obfuscation.redaction_payload,
-        llm_workflow_report_payload=llm_workflow_report,
-        privacy_summary_payload=obfuscation.privacy_summary,
+        obfuscated_sql=snapshot.obfuscated_sql,
+        mapping_payload=snapshot.mapping_payload,
+        context_payload=snapshot.context_payload,
+        llm_instructions_text=(
+            llm_instructions_text
+            if llm_instructions_text is not None
+            else prepared.instructions_text
+        ),
+        redaction_payload=snapshot.redaction_payload,
+        llm_workflow_report_payload=snapshot.llm_workflow_report,
+        privacy_summary_payload=snapshot.privacy_summary,
     )
-    mapping_payload = load_mapping_payload(workspace_path / "mapping.json")
-    context_payload = load_context_payload(workspace_path / "context.json")
+    load_mapping_payload(workspace_path / "mapping.json")
+    load_context_payload(workspace_path / "context.json")
     validate_workspace_integrity(workspace_path)
-    _enforce_or_warn_llm_safety(
-        obfuscation_summary=obfuscation.obfuscation_report or {},
+    _render_llm_safety_decision(
+        safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
-        privacy_summary=obfuscation.privacy_summary,
     )
+    if result is None:
+        raise WorkspaceError("Roundtrip verification did not complete.")
 
     output_path = _resolve_output_path_for_input(
         input_path,
@@ -948,89 +799,31 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         context="roundtrip",
     )
     if output_path is not None and not args.stdout_only:
-        _write_output_file(output_path, obfuscated_sql)
+        _write_output_file(output_path, snapshot.obfuscated_sql)
 
-    deobfuscated_sql, deobfuscation_report = deobfuscate_sql_with_report(
-        obfuscated_sql,
-        mapping_payload=mapping_payload,
-        context_payload=context_payload,
-    )
-    redaction_path = workspace_path / "redaction.json"
-    if redaction_path.exists():
-        redaction_payload = load_redaction_payload(redaction_path)
-        deobfuscated_sql, redaction_report = restore_reversible_redaction(
-            deobfuscated_sql,
-            dialect=context_payload.get("dialect", "tsql"),
-            pretty=bool(context_payload.get("pretty", True)),
-            redaction_payload=redaction_payload,
-        )
-        deobfuscation_report["redaction"] = redaction_report
+    deobfuscation = result.deobfuscation
     save_deobfuscation_artifacts(
         workspace_path=workspace_path,
-        deobfuscated_sql=deobfuscated_sql,
-        report_payload=deobfuscation_report,
+        deobfuscated_sql=deobfuscation.deobfuscated_sql,
+        report_payload=deobfuscation.report,
     )
-    _update_llm_workflow_report_with_deobfuscation(
+    _save_updated_llm_workflow_report(
         workspace_path=workspace_path,
-        report=deobfuscation_report,
+        report_payload=deobfuscation.llm_workflow_report,
     )
 
-    dialect = context_payload.get("dialect", "tsql")
-    try:
-        original_pretty_sql = _normalize_sql_for_comparison(original_sql, dialect=dialect)
-        deobfuscated_pretty_sql = _normalize_sql_for_comparison(deobfuscated_sql, dialect=dialect)
-    except ParseError as exc:
-        raise ParseScriptError(f"Parse error while building normalized roundtrip comparison: {exc}") from exc
-
-    normalized_diff_lines = list(
-        difflib.unified_diff(
-            original_pretty_sql.splitlines(keepends=True),
-            deobfuscated_pretty_sql.splitlines(keepends=True),
-            fromfile="reports/original_pretty.sql",
-            tofile="reports/deobfuscated_pretty.sql",
-        )
-    )
-    diff_text = _build_roundtrip_diff_text(
-        original_sql=original_sql,
-        deobfuscated_sql=deobfuscated_sql,
-        original_pretty_sql=original_pretty_sql,
-        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
-    )
-
-    roundtrip_report = {
-        "schema_version": 1,
-        "exact_match": original_sql == deobfuscated_sql,
-        "original_char_count": len(original_sql),
-        "deobfuscated_char_count": len(deobfuscated_sql),
-        "diff_line_count": len(diff_text.splitlines()),
-        "normalized_exact_match": original_pretty_sql == deobfuscated_pretty_sql,
-        "normalized_original_char_count": len(original_pretty_sql),
-        "normalized_deobfuscated_char_count": len(deobfuscated_pretty_sql),
-        "normalized_diff_line_count": len(normalized_diff_lines),
-        "deobfuscation_report": deobfuscation_report,
-    }
     save_roundtrip_reports(
         workspace_path=workspace_path,
-        report_payload=roundtrip_report,
-        diff_text=diff_text if args.diff_report else None,
-        original_pretty_sql=original_pretty_sql,
-        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
-        normalized_diff_text="".join(normalized_diff_lines),
+        report_payload=result.report,
+        diff_text=result.artifacts.diff_text if args.diff_report else None,
+        original_pretty_sql=result.artifacts.original_pretty_sql,
+        deobfuscated_pretty_sql=result.artifacts.deobfuscated_pretty_sql,
+        normalized_diff_text=result.artifacts.normalized_diff_text,
     )
 
-    print(deobfuscated_sql)
-    if deobfuscation_report.get("unknown_count", 0) > 0:
+    print(deobfuscation.deobfuscated_sql)
+    if deobfuscation.safety.has_unresolved or deobfuscation.safety.has_low_confidence:
         return 1
-    if deobfuscation_report.get("ambiguous_count", 0) > 0:
-        return 1
-    if deobfuscation_report.get("low_confidence_count", 0) > 0:
-        return 1
-    redaction_report = deobfuscation_report.get("redaction")
-    if isinstance(redaction_report, dict):
-        if redaction_report.get("unknown_placeholder_count", 0) > 0:
-            return 1
-        if redaction_report.get("missing_placeholder_count", 0) > 0:
-            return 1
     return 0
 
 
