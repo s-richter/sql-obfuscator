@@ -70,4 +70,8 @@ Desktop.ini
 *.obf/
 *_obfuscated.sql
 
+# agents
+skills-lock.json
+.agents/
+.claude/
 
