@@ -5,6 +5,7 @@ from typing import Any
 
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import WorkspaceError
+from .llm_edits import apply_llm_statement_replacements
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .workspace import build_default_llm_instructions
@@ -48,6 +49,12 @@ class PreparedWorkspace:
     instructions_text: str
     snapshot: WorkspaceSnapshot
     safety: LlmSafetyDecision
+
+
+@dataclass(frozen=True)
+class StatementReplacementResult:
+    applied_obfuscated_sql: str
+    report: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -155,6 +162,24 @@ def prepare_workspace(
     if options.llm_safe and safety.blockers:
         raise LlmSafetyError(prepared)
     return prepared
+
+
+def apply_statement_replacements(
+    snapshot: WorkspaceSnapshot,
+    edits_payload: dict[str, Any],
+) -> StatementReplacementResult:
+    applied_obfuscated_sql, report = apply_llm_statement_replacements(
+        obfuscated_sql=snapshot.obfuscated_sql,
+        statement_anchors=snapshot.context_payload.get("statement_anchors"),
+        batch_count=int(snapshot.context_payload.get("batch_count", 0)),
+        dialect=str(snapshot.context_payload.get("dialect", "tsql")),
+        edits_payload=edits_payload,
+        statement_count=snapshot.context_payload.get("statement_count"),
+    )
+    return StatementReplacementResult(
+        applied_obfuscated_sql=applied_obfuscated_sql,
+        report=report,
+    )
 
 
 def analyze_deobfuscation(

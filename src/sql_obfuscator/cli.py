@@ -13,7 +13,7 @@ from sqlglot.errors import ParseError
 from .dialects_factory import get_dialect_profile, supported_dialects
 from .deobfuscation import deobfuscate_sql_with_report
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
-from .llm_edits import apply_llm_statement_replacements, load_llm_edits_payload
+from .llm_edits import load_llm_edits_payload
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
@@ -26,6 +26,7 @@ from .workflow import (
     ObfuscationOptions,
     WorkspaceSnapshot,
     analyze_deobfuscation,
+    apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
 )
@@ -757,18 +758,10 @@ def _enforce_or_warn_llm_safety(
 def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     edits_path = Path(args.edits)
-    validate_workspace_integrity(workspace_path)
-    context_payload = load_context_payload(workspace_path / "context.json")
-    obfuscated_sql = _read_sql_file(workspace_path / "obfuscated.sql")
+    snapshot = _load_workspace_snapshot(workspace_path)
     edits_payload = load_llm_edits_payload(edits_path)
-    applied_sql, report = apply_llm_statement_replacements(
-        obfuscated_sql=obfuscated_sql,
-        statement_anchors=context_payload.get("statement_anchors"),
-        batch_count=int(context_payload.get("batch_count", 0)),
-        dialect=str(context_payload.get("dialect", "tsql")),
-        edits_payload=edits_payload,
-        statement_count=context_payload.get("statement_count"),
-    )
+    result = apply_statement_replacements(snapshot, edits_payload)
+    report = result.report
 
     print("apply-llm-edits summary:")
     print(f"applied_edit_count: {report.get('applied_edit_count', 0)}")
@@ -782,9 +775,9 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     output_path = Path(args.out) if args.out else workspace_path / "llm_response_obfuscated.sql"
     if output_path == workspace_path / "obfuscated.sql":
         raise WorkspaceError("apply-llm-edits cannot overwrite workspace obfuscated.sql")
-    _write_output_file(output_path, applied_sql)
+    _write_output_file(output_path, result.applied_obfuscated_sql)
     save_llm_edit_application_report(workspace_path=workspace_path, report_payload=report)
-    print(applied_sql)
+    print(result.applied_obfuscated_sql)
     return 0
 
 

@@ -6,6 +6,7 @@ from sql_obfuscator.workflow import (
     LlmSafetyError,
     ObfuscationOptions,
     analyze_deobfuscation,
+    apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
 )
@@ -86,6 +87,153 @@ def test_prepare_workspace_rejects_redaction_flags_without_redaction_mode():
             "SELECT 'secret';",
             input_name="input.sql",
             options=ObfuscationOptions(redact_literals=True),
+        )
+
+
+def test_apply_statement_replacements_returns_applied_sql_and_report_in_memory(capsys):
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    result = apply_statement_replacements(
+        prepared.snapshot,
+        {
+            "schema_version": 1,
+            "format": "statement_replacements",
+            "edits": [
+                {
+                    "statement_id": "stmt_0001",
+                    "sql": "SELECT 1",
+                }
+            ],
+        },
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert result.applied_obfuscated_sql == "SELECT 1"
+    assert result.report["applied_edit_count"] == 1
+    assert result.report["targeted_statement_ids"] == ["stmt_0001"]
+
+
+def test_apply_statement_replacements_preserves_untouched_statement_exactly():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users; SELECT OrderId FROM Orders;",
+        input_name="input.sql",
+        options=ObfuscationOptions(pretty=False),
+    )
+    first_anchor, second_anchor = prepared.snapshot.context_payload["statement_anchors"]
+
+    result = apply_statement_replacements(
+        prepared.snapshot,
+        {
+            "schema_version": 1,
+            "format": "statement_replacements",
+            "edits": [
+                {
+                    "statement_id": second_anchor["statement_id"],
+                    "sql": f"{second_anchor['obfuscated_sql']} WHERE 1 = 1",
+                }
+            ],
+        },
+    )
+
+    replacement_sql = f"{second_anchor['obfuscated_sql']} WHERE 1 = 1"
+    assert result.applied_obfuscated_sql == prepared.snapshot.obfuscated_sql.replace(
+        second_anchor["obfuscated_sql"],
+        replacement_sql,
+        1,
+    )
+    assert first_anchor["obfuscated_sql"] in result.applied_obfuscated_sql
+    assert result.report["untouched_statement_count"] == 1
+
+
+def test_apply_statement_replacements_rejects_unknown_statement_id():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    with pytest.raises(WorkspaceError, match="unknown statement_id"):
+        apply_statement_replacements(
+            prepared.snapshot,
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": "stmt_9999",
+                        "sql": "SELECT 1",
+                    }
+                ],
+            },
+        )
+
+
+def test_apply_statement_replacements_rejects_malformed_payload():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    with pytest.raises(WorkspaceError, match="'edits' list"):
+        apply_statement_replacements(
+            prepared.snapshot,
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": "not-a-list",
+            },
+        )
+
+
+def test_apply_statement_replacements_rejects_duplicate_statement_id():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    with pytest.raises(WorkspaceError, match="duplicate statement_id"):
+        apply_statement_replacements(
+            prepared.snapshot,
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": "stmt_0001",
+                        "sql": "SELECT 1",
+                    },
+                    {
+                        "statement_id": "stmt_0001",
+                        "sql": "SELECT 2",
+                    },
+                ],
+            },
+        )
+
+
+def test_apply_statement_replacements_rejects_multiple_sql_statements():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    with pytest.raises(WorkspaceError, match="exactly one"):
+        apply_statement_replacements(
+            prepared.snapshot,
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": "stmt_0001",
+                        "sql": "SELECT 1; SELECT 2;",
+                    }
+                ],
+            },
         )
 
 
