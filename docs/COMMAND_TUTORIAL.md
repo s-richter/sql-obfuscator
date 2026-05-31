@@ -792,7 +792,8 @@ SELECT 2;
 SQL input (invalid strict case):
 
 ```sql
-SELECT 1; GO
+SELECT 1;
+GO -- separator comment
 SELECT 2;
 ```
 

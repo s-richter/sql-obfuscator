@@ -44,9 +44,10 @@ Recommended action:
   batch independently before combining statements for surface analysis.
 - Added a CLI regression test for multi-batch T-SQL with `--llm-safe`.
 
-### 2. Medium: tutorial strict-`GO` failure example does not fail
+### 2. Resolved: tutorial strict-`GO` failure example did not fail
 
-`docs/COMMAND_TUTORIAL.md:792-817` presents this as an invalid strict case:
+`docs/COMMAND_TUTORIAL.md:792-817` previously presented this as an invalid
+strict case:
 
 ```sql
 SELECT 1; GO
@@ -54,12 +55,12 @@ SELECT 2;
 ```
 
 The implementation only rejects lines that start with `GO` but are not
-standalone separators (`src/sql_obfuscator/pipeline.py:121-126`). The documented
-example therefore does not trigger strict validation.
+standalone separators (`src/sql_obfuscator/pipeline.py:121-126`). The previous
+documented example therefore did not trigger strict validation.
 
-Recommended action:
+Resolution:
 
-- Replace the invalid example with:
+- Resolved on 2026-05-31: replaced the invalid example with:
 
 ```sql
 SELECT 1;
