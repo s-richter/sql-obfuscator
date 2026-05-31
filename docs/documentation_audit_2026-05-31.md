@@ -68,26 +68,27 @@ GO -- separator comment
 SELECT 2;
 ```
 
-### 3. Medium: the “Current State” recreation spec is outdated
+### 3. Resolved: the "Current State" recreation spec was outdated
 
-`specs/specs_2026_02_18.md` labels itself as the current state, but it no longer
-matches the codebase. Examples:
+`specs/specs_2026_02_18.md` previously labeled itself as the current state, but
+its preserved historical body no longer matches the codebase. Examples:
 
-- `specs/specs_2026_02_18.md:27-28` documents legacy invocation and only four
+- `specs/specs_2026_02_18.md:35-36` documents legacy invocation and only four
   subcommands.
-- `specs/specs_2026_02_18.md:53-56` documents legacy CLI fallback that no
+- `specs/specs_2026_02_18.md:61-64` documents legacy CLI fallback that no
   longer exists.
-- `specs/specs_2026_02_18.md:69` says `--strict-go` is a no-op.
-- `specs/specs_2026_02_18.md:122-128` describes animal-only generated names,
+- `specs/specs_2026_02_18.md:77` says `--strict-go` is a no-op.
+- `specs/specs_2026_02_18.md:130-136` describes animal-only generated names,
   while the current generator uses adjective-animal combinations.
 
 The current CLI includes `obfuscate`, `deobfuscate`, `validate-before-write`,
 `apply-llm-edits`, `roundtrip`, `translate`, and `workspace-info`.
 
-Recommended action:
+Resolution:
 
-- Regenerate the recreation spec from the current implementation, or
-- Rename and label it clearly as a historical snapshot.
+- Resolved on 2026-05-31: relabeled the dated recreation spec as a historical
+  snapshot and added a warning that directs readers to maintained usage docs,
+  current source, and tests for the live contract.
 
 ### 4. Medium: `use cases.md` needs bounded-edit guardrails
 
