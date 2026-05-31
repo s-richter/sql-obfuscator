@@ -6,6 +6,7 @@ from typing import Any
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
+from .dialects_factory import get_dialect_profile
 from .sqlglot_compat import parse_sql
 
 PRIVACY_SUMMARY_SCHEMA_VERSION = 1
@@ -69,7 +70,13 @@ def build_privacy_summary(
     fallback_preserved_statement_count: int,
 ) -> dict[str, Any]:
     try:
-        statements = parse_sql(sql_text, dialect=dialect)
+        profile = get_dialect_profile(dialect)
+        statements = [
+            statement
+            for batch_sql in profile.split_batches(sql_text)
+            if batch_sql.strip()
+            for statement in parse_sql(batch_sql, dialect=dialect)
+        ]
     except ParseError as exc:
         blockers = [
             "The privacy audit could not parse the obfuscated output for a full identifier-surface check. "

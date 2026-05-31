@@ -1468,6 +1468,23 @@ def test_cli_obfuscate_llm_safe_blocks_fallback_preserved_statements(tmp_path: P
     assert report["obfuscation_summary"]["fallback_preserved_statement_count"] == 1
 
 
+def test_cli_obfuscate_llm_safe_allows_standalone_go_batches(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "SELECT UserId FROM Users;\nGO\nSELECT OrderId FROM Orders;",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["obfuscate", str(sql_file), "--workspace", str(workspace), "--llm-safe"])
+    capsys.readouterr()
+
+    assert rc == 0
+    privacy_report = json.loads((workspace / "reports" / "privacy_summary.json").read_text(encoding="utf-8"))
+    assert privacy_report["llm_safe_blocked"] is False
+    assert privacy_report["analyzed_statement_count"] == 2
+
+
 def test_cli_roundtrip_llm_safe_blocks_fallback_preserved_statements(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
