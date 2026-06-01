@@ -10,17 +10,19 @@ from pathlib import Path
 from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
-from .translation import translate_sql_with_report
 from .workflow import (
     DeobfuscationResult,
     DeobfuscationSafetyError,
     LlmSafetyDecision,
     LlmSafetyError,
     ObfuscationOptions,
+    TranslationOptions,
     analyze_deobfuscation,
     apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
+    translate_document,
+    validate_deobfuscation,
     verify_roundtrip,
 )
 from .workspace import (
@@ -163,22 +165,6 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Fail closed when obfuscation preserves fallback/raw statements that are unsafe for external LLM sharing",
     )
-
-
-def _validate_redaction_args(args: argparse.Namespace) -> None:
-    uses_redaction_flags = bool(args.strip_comments or args.redact_literals)
-    if args.redaction_mode == "none" and uses_redaction_flags:
-        raise WorkspaceError(
-            "Redaction flags require --redaction-mode irreversible or --redaction-mode reversible."
-        )
-    if args.redaction_policy == "sensitive" and not args.redaction_sensitive_columns.strip():
-        raise WorkspaceError(
-            "Sensitive redaction policy requires --redaction-sensitive-columns."
-        )
-    if args.redaction_policy != "sensitive" and args.redaction_sensitive_columns.strip():
-        raise WorkspaceError(
-            "--redaction-sensitive-columns requires --redaction-policy sensitive."
-        )
 
 
 def _parse_sensitive_columns(raw: str) -> set[str]:
@@ -441,7 +427,6 @@ def _read_optional_template(path: str | None) -> str | None:
 
 
 def _run_obfuscate_command(args: argparse.Namespace) -> int:
-    _validate_redaction_args(args)
     if args.stdout_only and args.output_dir:
         raise WorkspaceError("obfuscate: --stdout-only and --output-dir cannot be used together.")
     sql_text, input_path = _read_sql_source(args.sql_file)
@@ -633,29 +618,17 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
 def _run_validate_before_write_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     input_path = Path(args.input)
-    result = _deobfuscate_pipeline(
-        workspace_path=workspace_path,
-        input_path=input_path,
-    )
-    report = result.report
-
-    print("validate-before-write summary:")
-    print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
-    print(f"unknown_count: {report.get('unknown_count', 0)}")
-    print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
-    print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
-    redaction_report = report.get("redaction")
-    if isinstance(redaction_report, dict):
-        print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
-        print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
-
+    snapshot = load_workspace_snapshot(workspace_path)
+    edited_sql = _read_sql_file(input_path)
     try:
-        require_safe_deobfuscation(
-            result,
+        result = validate_deobfuscation(
+            snapshot,
+            edited_sql,
             allow_unresolved=bool(args.allow_unresolved),
             allow_low_confidence=bool(args.allow_low_confidence),
         )
     except DeobfuscationSafetyError as exc:
+        _print_validate_before_write_summary(exc.result.report)
         if exc.reason == "unresolved":
             raise WorkspaceError(
                 "Validation failed: unresolved mappings found. "
@@ -666,12 +639,14 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
             "Use --allow-low-confidence to force output."
         ) from exc
 
+    _print_validate_before_write_summary(result.report)
+
     output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
     _write_output_file(output_path, result.deobfuscated_sql)
     save_deobfuscation_artifacts(
         workspace_path=workspace_path,
         deobfuscated_sql=result.deobfuscated_sql,
-        report_payload=report,
+        report_payload=result.report,
     )
     save_llm_workflow_report_if_present(
         workspace_path=workspace_path,
@@ -682,8 +657,19 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_validate_before_write_summary(report: dict) -> None:
+    print("validate-before-write summary:")
+    print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
+    print(f"unknown_count: {report.get('unknown_count', 0)}")
+    print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
+    print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
+    redaction_report = report.get("redaction")
+    if isinstance(redaction_report, dict):
+        print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
+        print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
+
+
 def _run_roundtrip_command(args: argparse.Namespace) -> int:
-    _validate_redaction_args(args)
     if args.stdout_only and args.output_dir:
         raise WorkspaceError("roundtrip: --stdout-only and --output-dir cannot be used together.")
     original_sql, input_path = _read_sql_source(args.sql_file)
@@ -853,13 +839,16 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("translate: --stdout-only and --output-dir cannot be used together.")
     if args.out and args.output_dir:
         raise WorkspaceError("translate: --out and --output-dir cannot be used together.")
-    result = translate_sql_with_report(
+    workflow_result = translate_document(
         sql_text,
-        source_dialect=args.source_dialect,
-        target_dialect=args.target_dialect,
-        pretty=args.pretty,
-        validate=args.validate,
+        options=TranslationOptions(
+            source_dialect=args.source_dialect,
+            target_dialect=args.target_dialect,
+            pretty=args.pretty,
+            validate=args.validate,
+        ),
     )
+    result = workflow_result.translation
 
     print(
         "translate summary: "
@@ -870,7 +859,6 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         f"warnings={len(result.warnings)}"
     )
 
-    translation_succeeded = result.failed_statement_count == 0 and (not args.validate or result.validated)
     if args.workspace:
         workspace_path = Path(args.workspace)
         save_translation_artifacts(
@@ -878,7 +866,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
             report_payload=asdict(result),
             translated_sql=(
                 result.output_sql
-                if translation_succeeded
+                if workflow_result.succeeded
                 and args.out is None
                 and not args.report_only
                 and not args.stdout_only
@@ -886,7 +874,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
             ),
         )
 
-    if not translation_succeeded:
+    if not workflow_result.succeeded:
         return 1
     if args.report_only:
         return 0

@@ -13,6 +13,7 @@ from .llm_edits import apply_llm_statement_replacements
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
+from .translation import TranslationResult, translate_sql_with_report
 from .workspace import WorkspaceSnapshot, build_default_llm_instructions
 
 
@@ -87,6 +88,20 @@ class RoundtripResult:
     normalized_exact_match: bool
     report: dict[str, Any]
     artifacts: RoundtripArtifacts
+
+
+@dataclass(frozen=True)
+class TranslationOptions:
+    source_dialect: str
+    target_dialect: str
+    pretty: bool = True
+    validate: bool = False
+
+
+@dataclass(frozen=True)
+class TranslationWorkflowResult:
+    translation: TranslationResult
+    succeeded: bool
 
 
 class LlmSafetyError(WorkspaceError):
@@ -236,6 +251,22 @@ def require_safe_deobfuscation(
         raise DeobfuscationSafetyError(result, reason="low_confidence")
 
 
+def validate_deobfuscation(
+    snapshot: WorkspaceSnapshot,
+    edited_sql: str,
+    *,
+    allow_unresolved: bool = False,
+    allow_low_confidence: bool = False,
+) -> DeobfuscationResult:
+    result = analyze_deobfuscation(snapshot, edited_sql)
+    require_safe_deobfuscation(
+        result,
+        allow_unresolved=allow_unresolved,
+        allow_low_confidence=allow_low_confidence,
+    )
+    return result
+
+
 def verify_roundtrip(
     sql: str,
     *,
@@ -305,6 +336,27 @@ def verify_roundtrip(
     )
 
 
+def translate_document(
+    sql: str,
+    *,
+    options: TranslationOptions,
+) -> TranslationWorkflowResult:
+    result = translate_sql_with_report(
+        sql,
+        source_dialect=options.source_dialect,
+        target_dialect=options.target_dialect,
+        pretty=options.pretty,
+        validate=options.validate,
+    )
+    return TranslationWorkflowResult(
+        translation=result,
+        succeeded=(
+            result.failed_statement_count == 0
+            and (not options.validate or result.validated)
+        ),
+    )
+
+
 def _normalize_sql_for_comparison(sql_text: str, *, dialect: str) -> str:
     profile = get_dialect_profile(dialect)
     normalized_batches: list[str] = []
@@ -365,9 +417,15 @@ def _validate_obfuscation_options(
             "Redaction flags require redaction_mode='irreversible' or redaction_mode='reversible'."
         )
     if options.redaction_policy == "sensitive" and not sensitive_columns:
-        raise WorkspaceError("Sensitive redaction policy requires sensitive_columns.")
+        raise WorkspaceError(
+            "Sensitive redaction policy requires --redaction-sensitive-columns "
+            "(sensitive_columns in Python)."
+        )
     if options.redaction_policy != "sensitive" and sensitive_columns:
-        raise WorkspaceError("sensitive_columns requires redaction_policy='sensitive'.")
+        raise WorkspaceError(
+            "--redaction-sensitive-columns (sensitive_columns in Python) requires "
+            "--redaction-policy sensitive (redaction_policy='sensitive' in Python)."
+        )
 
 
 def _deobfuscation_safety(report: dict[str, Any]) -> DeobfuscationSafetyDecision:

@@ -10,10 +10,13 @@ Use it when integrating SQL obfuscation into another Python application.
 ```python
 from sql_obfuscator.workflow import (
     ObfuscationOptions,
+    TranslationOptions,
     analyze_deobfuscation,
     apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
+    translate_document,
+    validate_deobfuscation,
     verify_roundtrip,
 )
 from sql_obfuscator.workspace import (
@@ -155,6 +158,18 @@ require_safe_deobfuscation(
 )
 ```
 
+Use `validate_deobfuscation()` when the host needs the common analyze-then-enforce sequence:
+
+```python
+from sql_obfuscator.workflow import validate_deobfuscation
+
+result = validate_deobfuscation(
+    prepared.snapshot,
+    application.applied_obfuscated_sql,
+)
+print(result.deobfuscated_sql)
+```
+
 ## Verify A Roundtrip
 
 ```python
@@ -172,9 +187,34 @@ print(result.normalized_exact_match)
 Use `verify_roundtrip()` when checking whether a script can be obfuscated and restored
 without an intervening edit.
 
+## Translate A Document
+
+```python
+from sql_obfuscator.workflow import TranslationOptions, translate_document
+
+result = translate_document(
+    "SELECT [CustomerId] FROM [Customers];",
+    options=TranslationOptions(
+        source_dialect="tsql",
+        target_dialect="hive",
+        validate=True,
+    ),
+)
+
+if result.succeeded:
+    print(result.translation.output_sql)
+else:
+    print(result.translation.failures)
+```
+
+`translate_document()` returns the translation report together with the host-neutral
+success decision used by the CLI. A GUI or web adapter can render the same structured
+result without reconstructing command rules.
+
 ## Adapter Responsibilities
 
-The workflow module owns SQL transformation and validation. A host adapter owns:
+The workflow module owns SQL transformation, operation sequencing, and validation. A host
+adapter owns:
 
 - reading input
 - choosing storage

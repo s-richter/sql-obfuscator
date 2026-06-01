@@ -5,10 +5,13 @@ from sql_obfuscator.workflow import (
     DeobfuscationSafetyError,
     LlmSafetyError,
     ObfuscationOptions,
+    TranslationOptions,
     analyze_deobfuscation,
     apply_statement_replacements,
     prepare_workspace,
     require_safe_deobfuscation,
+    translate_document,
+    validate_deobfuscation,
     verify_roundtrip,
 )
 
@@ -440,3 +443,68 @@ def test_require_safe_deobfuscation_blocks_low_confidence_mappings_unless_overri
     assert exc_info.value.reason == "low_confidence"
     assert exc_info.value.result is result
     require_safe_deobfuscation(result, allow_low_confidence=True)
+
+
+def test_validate_deobfuscation_returns_safe_result():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    result = validate_deobfuscation(
+        prepared.snapshot,
+        prepared.snapshot.obfuscated_sql,
+    )
+
+    assert result.safety.has_unresolved is False
+    assert "UserId" in result.deobfuscated_sql
+    assert "Users" in result.deobfuscated_sql
+
+
+def test_validate_deobfuscation_blocks_unsafe_result_unless_overridden():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name="input.sql",
+    )
+
+    with pytest.raises(DeobfuscationSafetyError, match="unresolved mappings"):
+        validate_deobfuscation(
+            prepared.snapshot,
+            "SELECT unknown_identifier FROM unknown_table;",
+        )
+
+    result = validate_deobfuscation(
+        prepared.snapshot,
+        "SELECT unknown_identifier FROM unknown_table;",
+        allow_unresolved=True,
+    )
+    assert result.safety.has_unresolved is True
+
+
+def test_translate_document_returns_structured_success_result():
+    result = translate_document(
+        "SELECT [UserId] FROM [Users];",
+        options=TranslationOptions(
+            source_dialect="tsql",
+            target_dialect="hive",
+            validate=True,
+        ),
+    )
+
+    assert result.succeeded is True
+    assert result.translation.validated is True
+    assert result.translation.failed_statement_count == 0
+    assert "UserId" in result.translation.output_sql
+
+
+def test_translate_document_returns_structured_failure_result():
+    result = translate_document(
+        "SELECT ((",
+        options=TranslationOptions(
+            source_dialect="tsql",
+            target_dialect="hive",
+        ),
+    )
+
+    assert result.succeeded is False
+    assert result.translation.failed_statement_count == 1
