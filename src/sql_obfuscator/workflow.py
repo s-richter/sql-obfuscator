@@ -16,11 +16,12 @@ from .diagnostics import (
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
 from .llm_edits import apply_llm_statement_replacements
+from .llm_instructions import build_default_llm_instructions
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .translation import TranslationResult, translate_sql_with_report
-from .workspace import WorkspaceSnapshot, build_default_llm_instructions
+from .workspace import WorkspaceSnapshot
 
 
 @dataclass(frozen=True)

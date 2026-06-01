@@ -49,6 +49,23 @@ print(prepared.snapshot.obfuscated_sql)
 - a `WorkspaceSnapshot`
 - external-sharing safety findings
 
+## Preview Generated LLM Instructions
+
+```python
+from sql_obfuscator.llm_instructions import build_default_llm_instructions
+
+instructions = build_default_llm_instructions(
+    input_name="script.sql",
+    dialect="tsql",
+    statement_anchors=prepared.snapshot.context_payload["statement_anchors"],
+)
+print(instructions)
+```
+
+Instruction rendering is host-neutral. A desktop or web host can preview the generated
+Markdown without importing local workspace persistence. `sql_obfuscator.workspace` retains
+its existing `build_default_llm_instructions()` entry point as a compatibility delegator.
+
 The snapshot contains:
 
 - obfuscated SQL

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import WorkspaceError
+from .llm_instructions import build_default_llm_instructions
 from .workspace import (
     CONTEXT_JSON_SCHEMA,
     CONTEXT_SCHEMA_VERSION,
@@ -26,7 +27,6 @@ from .workspace import (
     _validate_mapping_payload,
     _validate_privacy_summary_report_payload,
     _validate_redaction_payload,
-    build_default_llm_instructions,
 )
 
 
