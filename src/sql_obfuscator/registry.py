@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
-from .names import CompositeNameProvider
+from .names import CompositeNameProvider, IdentifierVocabulary
 
 
 @dataclass(frozen=True)
@@ -75,11 +75,13 @@ class IdentifierRegistry:
         *,
         profile: DialectProfile | None = None,
         seed: int | None = None,
+        identifier_vocabulary: IdentifierVocabulary | None = None,
     ) -> None:
         self._profile = profile or get_dialect_profile("tsql")
         self._name_provider = CompositeNameProvider(
             seed=seed,
             is_safe_identifier=self._profile.is_safe_identifier,
+            vocabulary=identifier_vocabulary,
         )
         self._map: dict[IdentifierKey, str] = {}
         self._entries: dict[IdentifierKey, MappingEntry] = {}

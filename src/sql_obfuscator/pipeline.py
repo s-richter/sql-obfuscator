@@ -9,6 +9,7 @@ from sqlglot.errors import ParseError
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError
+from .names import IdentifierVocabulary
 from .privacy import build_privacy_summary
 from .redaction import apply_redaction
 from .registry import IdentifierRegistry
@@ -149,6 +150,7 @@ def obfuscate_sql(
     redaction_mode: str = "none",
     redaction_policy: str = "all",
     sensitive_columns: set[str] | None = None,
+    identifier_vocabulary: IdentifierVocabulary | None = None,
 ) -> str:
     result = obfuscate_sql_with_metadata(
         script,
@@ -161,6 +163,7 @@ def obfuscate_sql(
         redaction_mode=redaction_mode,
         redaction_policy=redaction_policy,
         sensitive_columns=sensitive_columns,
+        identifier_vocabulary=identifier_vocabulary,
     )
     return result.output_sql
 
@@ -177,6 +180,7 @@ def obfuscate_sql_with_metadata(
     redaction_mode: str = "none",
     redaction_policy: str = "all",
     sensitive_columns: set[str] | None = None,
+    identifier_vocabulary: IdentifierVocabulary | None = None,
 ) -> ObfuscationResult:
     if strict_go:
         _validate_strict_go(script, dialect=dialect)
@@ -192,7 +196,11 @@ def obfuscate_sql_with_metadata(
     )
     redaction_input_sql = redaction_result.output_sql
     profile = get_dialect_profile(dialect)
-    registry = IdentifierRegistry(profile=profile, seed=seed)
+    registry = IdentifierRegistry(
+        profile=profile,
+        seed=seed,
+        identifier_vocabulary=identifier_vocabulary,
+    )
     batches = profile.split_batches(redaction_input_sql)
     transformed_batches: list[str] = []
     statement_anchors: list[dict[str, Any]] = []

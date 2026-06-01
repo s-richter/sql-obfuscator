@@ -49,6 +49,43 @@ print(prepared.snapshot.obfuscated_sql)
 - a `WorkspaceSnapshot`
 - external-sharing safety findings
 
+## Use A Custom Identifier Vocabulary
+
+Desktop and web hosts can load, validate, and preview edited identifier word lists before
+using them for future operations:
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.names import IdentifierVocabulary
+from sql_obfuscator.workflow import ObfuscationOptions, prepare_workspace
+
+vocabulary = IdentifierVocabulary.load(
+    adjectives_path=Path("identifier_adjectives.txt"),
+    replacements_path=Path("identifier_replacements.txt"),
+)
+
+for diagnostic in vocabulary.validation_diagnostics():
+    print(diagnostic.severity, diagnostic.message)
+
+print(vocabulary.pool_size)
+print(vocabulary.sample_names(count=5, seed=42))
+
+prepared = prepare_workspace(
+    "SELECT CustomerId FROM Customers;",
+    input_name="script.sql",
+    options=ObfuscationOptions(
+        seed=42,
+        identifier_vocabulary=vocabulary,
+    ),
+)
+```
+
+`IdentifierVocabulary` is immutable. Applying edited word lists creates a new vocabulary
+for future operations. Existing providers and in-progress operations keep their original
+snapshot. This avoids process-wide mutation when multiple desktop tabs or web requests use
+different vocabularies.
+
 ## Preview Generated LLM Instructions
 
 ```python

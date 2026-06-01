@@ -17,6 +17,7 @@ from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
 from .llm_edits import apply_llm_statement_replacements
 from .llm_instructions import build_default_llm_instructions
+from .names import IdentifierVocabulary
 from .pipeline import obfuscate_sql_with_metadata
 from .redaction import restore_reversible_redaction
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
@@ -36,6 +37,7 @@ class ObfuscationOptions:
     redaction_policy: str = "all"
     sensitive_columns: frozenset[str] = field(default_factory=frozenset)
     llm_safe: bool = False
+    identifier_vocabulary: IdentifierVocabulary | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +153,7 @@ def prepare_workspace(
         redaction_mode=options.redaction_mode,
         redaction_policy=options.redaction_policy,
         sensitive_columns=sensitive_columns,
+        identifier_vocabulary=options.identifier_vocabulary,
     )
     privacy_summary = obfuscation.privacy_summary or {}
     blockers = tuple(
