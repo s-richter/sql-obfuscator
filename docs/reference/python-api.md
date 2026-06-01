@@ -161,6 +161,29 @@ print(inspection.artifacts["reports/privacy_summary.json"])
 flags, and artifact availability. The CLI renders this result as text. A desktop host can
 render an artifact tree, and a web host can expose the same facts on a workspace page.
 
+## Browse Local Workspace Artifacts
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_application import LocalWorkspaceApplication
+
+app = LocalWorkspaceApplication()
+workspace = app.open_workspace(Path("script.obf"))
+
+for artifact in workspace.artifacts:
+    print(artifact.relative_path, artifact.kind, artifact.available)
+
+content = app.load_workspace_artifact(Path("script.obf"), "obfuscated.sql")
+print(content.text)
+```
+
+`open_workspace()` validates integrity and returns an ordered artifact tree. Each artifact
+describes its kind, media type, availability, read-only status, and whether workspace
+integrity metadata protects it. `load_workspace_artifact()` reads only cataloged workspace
+paths, rejects traversal, escaping links, and unknown paths, and validates integrity before
+loading content.
+
 ## Apply Structured LLM Edits
 
 ```python

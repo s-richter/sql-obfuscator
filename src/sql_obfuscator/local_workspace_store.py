@@ -53,6 +53,107 @@ WORKSPACE_ARTIFACT_PATHS = (
 
 
 @dataclass(frozen=True)
+class WorkspaceArtifactDefinition:
+    relative_path: str
+    kind: str
+    media_type: str
+    read_only: bool = True
+
+
+WORKSPACE_ARTIFACT_CATALOG = (
+    WorkspaceArtifactDefinition("original.sql", "original_sql", "text/sql"),
+    WorkspaceArtifactDefinition("obfuscated.sql", "obfuscated_sql", "text/sql"),
+    WorkspaceArtifactDefinition(
+        "llm_response_obfuscated.sql",
+        "llm_response_sql",
+        "text/sql",
+    ),
+    WorkspaceArtifactDefinition("deobfuscated.sql", "deobfuscated_sql", "text/sql"),
+    WorkspaceArtifactDefinition("translated.sql", "translated_sql", "text/sql"),
+    WorkspaceArtifactDefinition("llm_instructions.md", "llm_instructions", "text/markdown"),
+    WorkspaceArtifactDefinition("mapping.schema.json", "schema", "application/json"),
+    WorkspaceArtifactDefinition("mapping.json", "mapping", "application/json"),
+    WorkspaceArtifactDefinition("context.schema.json", "schema", "application/json"),
+    WorkspaceArtifactDefinition("context.json", "context", "application/json"),
+    WorkspaceArtifactDefinition("integrity.schema.json", "schema", "application/json"),
+    WorkspaceArtifactDefinition("integrity.json", "integrity", "application/json"),
+    WorkspaceArtifactDefinition("redaction.schema.json", "schema", "application/json"),
+    WorkspaceArtifactDefinition("redaction.json", "redaction", "application/json"),
+    WorkspaceArtifactDefinition(
+        "reports/privacy_summary.schema.json",
+        "schema",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/privacy_summary.json",
+        "privacy_report",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/llm_workflow_report.schema.json",
+        "schema",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/llm_workflow_report.json",
+        "llm_workflow_report",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/llm_edit_application_report.schema.json",
+        "schema",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/llm_edit_application_report.json",
+        "llm_edit_application_report",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/deobfuscation_report.json",
+        "deobfuscation_report",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/coverage_report.txt",
+        "coverage_report",
+        "text/plain",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/roundtrip_report.json",
+        "roundtrip_report",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition("reports/roundtrip_diff.txt", "diff", "text/plain"),
+    WorkspaceArtifactDefinition(
+        "reports/original_pretty.sql",
+        "normalized_sql",
+        "text/sql",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/deobfuscated_pretty.sql",
+        "normalized_sql",
+        "text/sql",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/roundtrip_normalized_diff.txt",
+        "diff",
+        "text/plain",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/translation_report.schema.json",
+        "schema",
+        "application/json",
+    ),
+    WorkspaceArtifactDefinition(
+        "reports/translation_report.json",
+        "translation_report",
+        "application/json",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class WorkspaceInspection:
     workspace_path: Path
     dialect: str | None
@@ -69,6 +170,29 @@ class WorkspaceInspection:
     privacy_llm_safe_blocked: bool | None
     privacy_review_recommended: bool | None
     artifacts: dict[str, bool]
+
+
+@dataclass(frozen=True)
+class WorkspaceArtifact:
+    relative_path: str
+    kind: str
+    media_type: str
+    available: bool
+    read_only: bool
+    integrity_protected: bool
+
+
+@dataclass(frozen=True)
+class LocalWorkspaceView:
+    workspace_path: Path
+    inspection: WorkspaceInspection
+    artifacts: tuple[WorkspaceArtifact, ...]
+
+
+@dataclass(frozen=True)
+class WorkspaceArtifactContent:
+    artifact: WorkspaceArtifact
+    text: str
 
 
 class LocalWorkspaceStore:
@@ -255,6 +379,67 @@ class LocalWorkspaceStore:
         mapping_payload = self.load_mapping_payload(workspace_path / "mapping.json")
         context_payload = self.load_context_payload(workspace_path / "context.json")
         integrity_payload = self.validate_workspace_integrity(workspace_path)
+        return self._build_workspace_inspection(
+            workspace_path,
+            mapping_payload=mapping_payload,
+            context_payload=context_payload,
+            integrity_payload=integrity_payload,
+        )
+
+    def open_workspace(self, workspace_path: Path) -> LocalWorkspaceView:
+        inspection = self.inspect_workspace(workspace_path)
+        integrity_payload = self._read_json(workspace_path / "integrity.json")
+        protected_paths = set(integrity_payload.get("files", {}))
+        return LocalWorkspaceView(
+            workspace_path=workspace_path,
+            inspection=inspection,
+            artifacts=tuple(
+                WorkspaceArtifact(
+                    relative_path=definition.relative_path,
+                    kind=definition.kind,
+                    media_type=definition.media_type,
+                    available=(workspace_path / definition.relative_path).exists(),
+                    read_only=definition.read_only,
+                    integrity_protected=definition.relative_path in protected_paths,
+                )
+                for definition in WORKSPACE_ARTIFACT_CATALOG
+            ),
+        )
+
+    def load_workspace_artifact(
+        self,
+        workspace_path: Path,
+        relative_path: str | Path,
+    ) -> WorkspaceArtifactContent:
+        normalized_path = self._normalize_workspace_artifact_path(relative_path)
+        workspace = self.open_workspace(workspace_path)
+        artifact = next(
+            (
+                candidate
+                for candidate in workspace.artifacts
+                if candidate.relative_path == normalized_path
+            ),
+            None,
+        )
+        if artifact is None:
+            raise WorkspaceError(f"Unknown workspace artifact path: {relative_path}")
+        if not artifact.available:
+            raise WorkspaceError(f"Workspace artifact is not available: {normalized_path}")
+        return WorkspaceArtifactContent(
+            artifact=artifact,
+            text=self._read_text(
+                self._resolve_workspace_artifact_path(workspace_path, normalized_path)
+            ),
+        )
+
+    def _build_workspace_inspection(
+        self,
+        workspace_path: Path,
+        *,
+        mapping_payload: dict[str, Any],
+        context_payload: dict[str, Any],
+        integrity_payload: dict[str, Any],
+    ) -> WorkspaceInspection:
         privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
         privacy_summary = (
             self.load_privacy_summary_report(privacy_summary_path)
@@ -289,6 +474,35 @@ class LocalWorkspaceStore:
                 for rel_path in WORKSPACE_ARTIFACT_PATHS
             },
         )
+
+    def _normalize_workspace_artifact_path(self, relative_path: str | Path) -> str:
+        candidate = Path(relative_path)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            raise WorkspaceError(
+                f"Workspace artifact path must stay within the workspace: {relative_path}"
+            )
+        normalized = candidate.as_posix()
+        if normalized in ("", "."):
+            raise WorkspaceError(f"Unknown workspace artifact path: {relative_path}")
+        return normalized
+
+    def _resolve_workspace_artifact_path(
+        self,
+        workspace_path: Path,
+        relative_path: str,
+    ) -> Path:
+        try:
+            resolved_workspace_path = workspace_path.resolve(strict=True)
+            resolved_artifact_path = (workspace_path / relative_path).resolve(strict=True)
+        except OSError as exc:
+            raise WorkspaceError(
+                f"Unable to resolve workspace artifact path: {relative_path}"
+            ) from exc
+        if not resolved_artifact_path.is_relative_to(resolved_workspace_path):
+            raise WorkspaceError(
+                f"Workspace artifact path must stay within the workspace: {relative_path}"
+            )
+        return resolved_artifact_path
 
     def save_deobfuscation_artifacts(
         self,

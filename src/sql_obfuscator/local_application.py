@@ -7,7 +7,12 @@ from typing import Any
 
 from .diagnostics import WorkflowDiagnostic
 from .errors import InputFileError, WorkspaceError
-from .local_workspace_store import LocalWorkspaceStore, WorkspaceInspection
+from .local_workspace_store import (
+    LocalWorkspaceStore,
+    LocalWorkspaceView,
+    WorkspaceArtifactContent,
+    WorkspaceInspection,
+)
 from .workflow import (
     DeobfuscationResult,
     LlmSafetyError,
@@ -81,6 +86,16 @@ class LocalWorkspaceApplication:
 
     def inspect_workspace(self, workspace_path: Path) -> WorkspaceInspection:
         return self.store.inspect_workspace(workspace_path)
+
+    def open_workspace(self, workspace_path: Path) -> LocalWorkspaceView:
+        return self.store.open_workspace(workspace_path)
+
+    def load_workspace_artifact(
+        self,
+        workspace_path: Path,
+        relative_path: str | Path,
+    ) -> WorkspaceArtifactContent:
+        return self.store.load_workspace_artifact(workspace_path, relative_path)
 
     def prepare_and_save_workspace(
         self,
