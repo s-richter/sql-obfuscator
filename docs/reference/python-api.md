@@ -279,6 +279,35 @@ report payload when a user needs the full audit artifact. Preparation diagnostic
 as `prepared.safety.diagnostics`; restoration and translation diagnostics are available directly
 on their workflow results.
 
+## Present Application Errors
+
+Workflow operations continue to raise typed exceptions. Host adapters can map those failures
+to stable user-facing metadata without duplicating error rules:
+
+```python
+from sql_obfuscator.application_errors import present_application_error
+
+try:
+    prepared = prepare_workspace(
+        sql_text,
+        input_name="script.sql",
+        options=ObfuscationOptions(llm_safe=True),
+    )
+except Exception as exc:
+    presentation = present_application_error(exc)
+    print(presentation.code)
+    print(presentation.title)
+    print(presentation.message)
+    print(presentation.recommendation)
+    print(presentation.report_paths)
+```
+
+An `ApplicationErrorPresentation` contains a stable code, title, message, severity,
+recommended recovery action, and relevant report paths. Desktop hosts can render dialogs,
+web adapters can serialize the fields, and the CLI renders the message to `stderr`.
+Unexpected exceptions receive a conservative generic message so internal details are not
+exposed to users.
+
 `require_safe_deobfuscation()` raises when unresolved or low-confidence findings remain.
 Override arguments exist for deliberate manual-review workflows:
 

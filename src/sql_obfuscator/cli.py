@@ -6,6 +6,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
+from .application_errors import present_application_error
 from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
@@ -778,7 +779,8 @@ def main(argv: list[str] | None = None) -> int:
             summary = _summarize_sqlglot_warnings(sqlglot_warnings)
             if summary:
                 print(summary, file=sys.stderr)
-            print(f"Error: {exc}", file=sys.stderr)
+            presentation = present_application_error(exc)
+            print(f"Error: {presentation.message}", file=sys.stderr)
             return 1
 
     summary = _summarize_sqlglot_warnings(sqlglot_warnings)
