@@ -3,38 +3,19 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from dataclasses import asdict
 from contextlib import contextmanager
 from pathlib import Path
 
 from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
-from .local_workspace_store import LocalWorkspaceStore, WorkspaceInspection
+from .local_application import LocalWorkspaceApplication
+from .local_workspace_store import WorkspaceInspection
 from .workflow import (
-    DeobfuscationResult,
     DeobfuscationSafetyError,
     LlmSafetyDecision,
-    LlmSafetyError,
     ObfuscationOptions,
     TranslationOptions,
-    analyze_deobfuscation,
-    apply_statement_replacements,
-    prepare_workspace,
-    require_safe_deobfuscation,
-    translate_document,
-    validate_deobfuscation,
-    verify_roundtrip,
-)
-from .workspace import (
-    default_workspace_path,
-    load_workspace_snapshot,
-    save_deobfuscation_artifacts,
-    save_llm_edit_application_report,
-    save_llm_workflow_report_if_present,
-    save_roundtrip_reports,
-    save_translation_artifacts,
-    save_workspace_snapshot,
 )
 
 
@@ -428,44 +409,30 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("obfuscate: --stdout-only and --output-dir cannot be used together.")
     sql_text, input_path = _read_sql_source(args.sql_file)
     input_reference = input_path if input_path is not None else Path("stdin.sql")
-    try:
-        prepared = prepare_workspace(
-            sql_text,
-            input_name=input_reference.name,
-            options=ObfuscationOptions(
-                dialect=args.dialect,
-                seed=args.seed,
-                strict_go=args.strict_go,
-                pretty=args.pretty,
-                redact_literals=args.redact_literals,
-                strip_comments=args.strip_comments,
-                redaction_mode=args.redaction_mode,
-                redaction_policy=args.redaction_policy,
-                sensitive_columns=frozenset(
-                    _parse_sensitive_columns(args.redaction_sensitive_columns)
-                ),
-                llm_safe=bool(args.llm_safe),
+    application = LocalWorkspaceApplication()
+    operation = application.prepare_and_save_workspace(
+        sql_text,
+        input_path=input_reference,
+        workspace_path=Path(args.workspace) if args.workspace else None,
+        options=ObfuscationOptions(
+            dialect=args.dialect,
+            seed=args.seed,
+            strict_go=args.strict_go,
+            pretty=args.pretty,
+            redact_literals=args.redact_literals,
+            strip_comments=args.strip_comments,
+            redaction_mode=args.redaction_mode,
+            redaction_policy=args.redaction_policy,
+            sensitive_columns=frozenset(
+                _parse_sensitive_columns(args.redaction_sensitive_columns)
             ),
-        )
-    except LlmSafetyError as exc:
-        prepared = exc.prepared
+            llm_safe=bool(args.llm_safe),
+        ),
+        instructions_text=_read_optional_template(args.instruction_template),
+    )
+    prepared = operation.prepared
     snapshot = prepared.snapshot
     output_sql = snapshot.obfuscated_sql
-    llm_instructions_text = _read_optional_template(args.instruction_template)
-
-    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
-    save_workspace_snapshot(
-        workspace_path=workspace_path,
-        input_path=input_reference,
-        original_sql=sql_text,
-        snapshot=snapshot,
-        instructions_text=(
-            llm_instructions_text
-            if llm_instructions_text is not None
-            else prepared.instructions_text
-        ),
-    )
-    load_workspace_snapshot(workspace_path)
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -482,16 +449,6 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
 
     print(output_sql)
     return 0
-
-
-def _deobfuscate_pipeline(
-    *,
-    workspace_path: Path,
-    input_path: Path,
-) -> DeobfuscationResult:
-    snapshot = load_workspace_snapshot(workspace_path)
-    edited_sql = _read_sql_file(input_path)
-    return analyze_deobfuscation(snapshot, edited_sql)
 
 
 def _summarize_llm_safe_findings(findings: list[str]) -> str:
@@ -533,10 +490,13 @@ def _render_llm_safety_decision(
 
 def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
-    edits_path = Path(args.edits)
-    snapshot = load_workspace_snapshot(workspace_path)
-    edits_payload = load_llm_edits_payload(edits_path)
-    result = apply_statement_replacements(snapshot, edits_payload)
+    operation = LocalWorkspaceApplication().apply_and_save_statement_replacements(
+        workspace_path,
+        load_llm_edits_payload(Path(args.edits)),
+        output_path=Path(args.out) if args.out else None,
+        persist=not args.dry_run,
+    )
+    result = operation.replacement
     report = result.report
 
     print("apply-llm-edits summary:")
@@ -548,22 +508,35 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     if args.dry_run:
         return 0
 
-    output_path = Path(args.out) if args.out else workspace_path / "llm_response_obfuscated.sql"
-    if output_path == workspace_path / "obfuscated.sql":
-        raise WorkspaceError("apply-llm-edits cannot overwrite workspace obfuscated.sql")
-    _write_output_file(output_path, result.applied_obfuscated_sql)
-    save_llm_edit_application_report(workspace_path=workspace_path, report_payload=report)
     print(result.applied_obfuscated_sql)
     return 0
 
 
 def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
-    input_path = Path(args.input)
-    result = _deobfuscate_pipeline(
-        workspace_path=workspace_path,
-        input_path=input_path,
-    )
+    edited_sql = _read_sql_file(Path(args.input))
+    application = LocalWorkspaceApplication()
+    if args.dry_run:
+        result = application.analyze_deobfuscation(workspace_path, edited_sql).deobfuscation
+    else:
+        try:
+            result = application.deobfuscate_and_save(
+                workspace_path,
+                edited_sql,
+                output_path=Path(args.out) if args.out else None,
+                allow_unresolved=bool(args.allow_unresolved),
+                allow_low_confidence=bool(args.allow_low_confidence),
+            ).deobfuscation
+        except DeobfuscationSafetyError as exc:
+            if exc.reason == "unresolved":
+                raise WorkspaceError(
+                    "De-obfuscation found unresolved mappings. "
+                    "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
+                ) from exc
+            raise WorkspaceError(
+                "De-obfuscation found low-confidence mappings. "
+                "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
+            ) from exc
     report = result.report
     if args.dry_run:
         print("deobfuscate dry-run summary:")
@@ -584,50 +557,21 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
             return 1
         return 0
 
-    try:
-        require_safe_deobfuscation(
-            result,
-            allow_unresolved=bool(args.allow_unresolved),
-            allow_low_confidence=bool(args.allow_low_confidence),
-        )
-    except DeobfuscationSafetyError as exc:
-        if exc.reason == "unresolved":
-            raise WorkspaceError(
-                "De-obfuscation found unresolved mappings. "
-                "Use --dry-run for diagnostics or pass --allow-unresolved to force output."
-            ) from exc
-        raise WorkspaceError(
-            "De-obfuscation found low-confidence mappings. "
-            "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
-        ) from exc
-
-    output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
-    _write_output_file(output_path, result.deobfuscated_sql)
-    save_deobfuscation_artifacts(
-        workspace_path=workspace_path,
-        deobfuscated_sql=result.deobfuscated_sql,
-        report_payload=report,
-    )
-    save_llm_workflow_report_if_present(
-        workspace_path=workspace_path,
-        report_payload=result.llm_workflow_report,
-    )
     print(result.deobfuscated_sql)
     return 0
 
 
 def _run_validate_before_write_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
-    input_path = Path(args.input)
-    snapshot = load_workspace_snapshot(workspace_path)
-    edited_sql = _read_sql_file(input_path)
+    edited_sql = _read_sql_file(Path(args.input))
     try:
-        result = validate_deobfuscation(
-            snapshot,
+        result = LocalWorkspaceApplication().validate_and_save_deobfuscation(
+            workspace_path,
             edited_sql,
+            output_path=Path(args.out) if args.out else None,
             allow_unresolved=bool(args.allow_unresolved),
             allow_low_confidence=bool(args.allow_low_confidence),
-        )
+        ).deobfuscation
     except DeobfuscationSafetyError as exc:
         _print_validate_before_write_summary(exc.result.report)
         if exc.reason == "unresolved":
@@ -642,17 +586,6 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
 
     _print_validate_before_write_summary(result.report)
 
-    output_path = Path(args.out) if args.out else workspace_path / "deobfuscated.sql"
-    _write_output_file(output_path, result.deobfuscated_sql)
-    save_deobfuscation_artifacts(
-        workspace_path=workspace_path,
-        deobfuscated_sql=result.deobfuscated_sql,
-        report_payload=result.report,
-    )
-    save_llm_workflow_report_if_present(
-        workspace_path=workspace_path,
-        report_payload=result.llm_workflow_report,
-    )
     print("validation passed: wrote de-obfuscated output")
     print(result.deobfuscated_sql)
     return 0
@@ -675,45 +608,30 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("roundtrip: --stdout-only and --output-dir cannot be used together.")
     original_sql, input_path = _read_sql_source(args.sql_file)
     input_reference = input_path if input_path is not None else Path("stdin.sql")
-    try:
-        result = verify_roundtrip(
-            original_sql,
-            input_name=input_reference.name,
-            options=ObfuscationOptions(
-                dialect=args.dialect,
-                seed=args.seed,
-                strict_go=args.strict_go,
-                pretty=args.pretty,
-                redact_literals=args.redact_literals,
-                strip_comments=args.strip_comments,
-                redaction_mode=args.redaction_mode,
-                redaction_policy=args.redaction_policy,
-                sensitive_columns=frozenset(
-                    _parse_sensitive_columns(args.redaction_sensitive_columns)
-                ),
-                llm_safe=bool(args.llm_safe),
-            ),
-        )
-        prepared = result.prepared
-    except LlmSafetyError as exc:
-        prepared = exc.prepared
-        result = None
-    snapshot = prepared.snapshot
-    llm_instructions_text = _read_optional_template(args.instruction_template)
-
-    workspace_path = Path(args.workspace) if args.workspace else default_workspace_path(input_reference)
-    save_workspace_snapshot(
-        workspace_path=workspace_path,
+    operation = LocalWorkspaceApplication().verify_and_save_roundtrip(
+        original_sql,
         input_path=input_reference,
-        original_sql=original_sql,
-        snapshot=snapshot,
-        instructions_text=(
-            llm_instructions_text
-            if llm_instructions_text is not None
-            else prepared.instructions_text
+        workspace_path=Path(args.workspace) if args.workspace else None,
+        options=ObfuscationOptions(
+            dialect=args.dialect,
+            seed=args.seed,
+            strict_go=args.strict_go,
+            pretty=args.pretty,
+            redact_literals=args.redact_literals,
+            strip_comments=args.strip_comments,
+            redaction_mode=args.redaction_mode,
+            redaction_policy=args.redaction_policy,
+            sensitive_columns=frozenset(
+                _parse_sensitive_columns(args.redaction_sensitive_columns)
+            ),
+            llm_safe=bool(args.llm_safe),
         ),
+        instructions_text=_read_optional_template(args.instruction_template),
+        include_diff_report=bool(args.diff_report),
     )
-    load_workspace_snapshot(workspace_path)
+    prepared = operation.prepared
+    result = operation.roundtrip
+    snapshot = prepared.snapshot
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -731,25 +649,6 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
         _write_output_file(output_path, snapshot.obfuscated_sql)
 
     deobfuscation = result.deobfuscation
-    save_deobfuscation_artifacts(
-        workspace_path=workspace_path,
-        deobfuscated_sql=deobfuscation.deobfuscated_sql,
-        report_payload=deobfuscation.report,
-    )
-    save_llm_workflow_report_if_present(
-        workspace_path=workspace_path,
-        report_payload=deobfuscation.llm_workflow_report,
-    )
-
-    save_roundtrip_reports(
-        workspace_path=workspace_path,
-        report_payload=result.report,
-        diff_text=result.artifacts.diff_text if args.diff_report else None,
-        original_pretty_sql=result.artifacts.original_pretty_sql,
-        deobfuscated_pretty_sql=result.artifacts.deobfuscated_pretty_sql,
-        normalized_diff_text=result.artifacts.normalized_diff_text,
-    )
-
     print(deobfuscation.deobfuscated_sql)
     if deobfuscation.safety.has_unresolved or deobfuscation.safety.has_low_confidence:
         return 1
@@ -758,7 +657,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
 
 def _run_workspace_info_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
-    inspection = LocalWorkspaceStore().inspect_workspace(workspace_path)
+    inspection = LocalWorkspaceApplication().inspect_workspace(workspace_path)
     print(_format_workspace_inspection(inspection))
     return 0
 
@@ -802,7 +701,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         raise WorkspaceError("translate: --stdout-only and --output-dir cannot be used together.")
     if args.out and args.output_dir:
         raise WorkspaceError("translate: --out and --output-dir cannot be used together.")
-    workflow_result = translate_document(
+    operation = LocalWorkspaceApplication().translate_and_save_artifacts(
         sql_text,
         options=TranslationOptions(
             source_dialect=args.source_dialect,
@@ -810,7 +709,14 @@ def _run_translate_command(args: argparse.Namespace) -> int:
             pretty=args.pretty,
             validate=args.validate,
         ),
+        workspace_path=Path(args.workspace) if args.workspace else None,
+        persist_translated_sql=(
+            args.out is None
+            and not args.report_only
+            and not args.stdout_only
+        ),
     )
+    workflow_result = operation.translation
     result = workflow_result.translation
 
     print(
@@ -821,21 +727,6 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         f"failed={result.failed_statement_count} "
         f"warnings={len(result.warnings)}"
     )
-
-    if args.workspace:
-        workspace_path = Path(args.workspace)
-        save_translation_artifacts(
-            workspace_path=workspace_path,
-            report_payload=asdict(result),
-            translated_sql=(
-                result.output_sql
-                if workflow_result.succeeded
-                and args.out is None
-                and not args.report_only
-                and not args.stdout_only
-                else None
-            ),
-        )
 
     if not workflow_result.succeeded:
         return 1

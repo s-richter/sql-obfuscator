@@ -297,6 +297,36 @@ adapter owns:
 The CLI is one adapter. A future web adapter should reuse the workflow operations while
 adding tenant-scoped storage, opaque workspace IDs, request handling, and resource limits.
 
+## Local Application Adapter
+
+Use `LocalWorkspaceApplication` when a desktop host needs workflow operations plus local
+workspace persistence:
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_application import LocalWorkspaceApplication
+from sql_obfuscator.workflow import ObfuscationOptions
+
+app = LocalWorkspaceApplication()
+operation = app.prepare_and_save_workspace(
+    sql_text,
+    input_path=Path("script.sql"),
+    options=ObfuscationOptions(llm_safe=True),
+)
+
+print(operation.workspace_path)
+print(operation.written_artifact_paths)
+for diagnostic in operation.diagnostics:
+    print(diagnostic.severity, diagnostic.message)
+```
+
+The adapter composes the host-neutral workflow module with `LocalWorkspaceStore`. Its
+structured results report workspace paths, written artifacts, and diagnostics without
+printing output or choosing terminal exit codes. The CLI uses the same adapter and remains
+responsible for argument parsing, stdin, terminal messages, sibling output files, and exit
+codes.
+
 ## Related Documents
 
 - [Sharing SQL With an External LLM](../guides/llm-sharing.md)
