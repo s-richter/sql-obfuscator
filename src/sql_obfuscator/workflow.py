@@ -7,6 +7,12 @@ from typing import Any
 from sqlglot.errors import ParseError
 
 from .deobfuscation import deobfuscate_sql_with_report
+from .diagnostics import (
+    WorkflowDiagnostic,
+    deobfuscation_diagnostics,
+    privacy_diagnostics,
+    translation_diagnostics,
+)
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
 from .llm_edits import apply_llm_statement_replacements
@@ -36,6 +42,7 @@ class LlmSafetyDecision:
     approved: bool
     blockers: tuple[str, ...]
     warnings: tuple[str, ...]
+    diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,7 @@ class DeobfuscationResult:
     report: dict[str, Any]
     safety: DeobfuscationSafetyDecision
     llm_workflow_report: dict[str, Any]
+    diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -102,6 +110,7 @@ class TranslationOptions:
 class TranslationWorkflowResult:
     translation: TranslationResult
     succeeded: bool
+    diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
 
 class LlmSafetyError(WorkspaceError):
@@ -153,6 +162,7 @@ def prepare_workspace(
         approved=not blockers,
         blockers=blockers,
         warnings=warnings,
+        diagnostics=privacy_diagnostics(privacy_summary),
     )
     obfuscation_summary = obfuscation.obfuscation_report or {}
     llm_workflow_report = {
@@ -232,6 +242,7 @@ def analyze_deobfuscation(
         deobfuscated_sql=deobfuscated_sql,
         report=report,
         safety=safety,
+        diagnostics=deobfuscation_diagnostics(report),
         llm_workflow_report=_updated_llm_workflow_report(
             snapshot.llm_workflow_report,
             deobfuscation_report=report,
@@ -354,6 +365,7 @@ def translate_document(
             result.failed_statement_count == 0
             and (not options.validate or result.validated)
         ),
+        diagnostics=translation_diagnostics(result),
     )
 
 

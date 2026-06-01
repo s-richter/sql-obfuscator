@@ -186,6 +186,22 @@ print(result.deobfuscated_sql)
 `analyze_deobfuscation()` returns restored SQL, a diagnostic report, safety findings, and an
 updated LLM workflow report.
 
+Workflow results also expose host-neutral `diagnostics` tuples. Each `WorkflowDiagnostic`
+contains a stable `code`, `severity`, user-facing `message`, optional `recommendation`, and
+optional statement or identifier context:
+
+```python
+for diagnostic in result.diagnostics:
+    print(diagnostic.severity, diagnostic.code, diagnostic.message)
+    if diagnostic.statement_anchor:
+        print("statement:", diagnostic.statement_anchor)
+```
+
+Use these structured diagnostics for a desktop results panel or a web response. Keep the raw
+report payload when a user needs the full audit artifact. Preparation diagnostics are available
+as `prepared.safety.diagnostics`; restoration and translation diagnostics are available directly
+on their workflow results.
+
 `require_safe_deobfuscation()` raises when unresolved or low-confidence findings remain.
 Override arguments exist for deliberate manual-review workflows:
 

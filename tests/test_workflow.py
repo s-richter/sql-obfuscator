@@ -67,6 +67,12 @@ def test_prepare_workspace_returns_expert_mode_blockers_and_warnings():
     assert any("local variable reference" in item for item in prepared.safety.blockers)
     assert any("system variable" in item for item in prepared.safety.warnings)
     assert any("common schema qualifier" in item for item in prepared.safety.warnings)
+    assert {diagnostic.code for diagnostic in prepared.safety.diagnostics} == {
+        "privacy.local_variables",
+        "privacy.system_variables",
+        "privacy.common_schema_qualifiers",
+    }
+    assert all(diagnostic.recommendation for diagnostic in prepared.safety.diagnostics)
     assert prepared.snapshot.llm_workflow_report["llm_safe_requested"] is False
     assert prepared.snapshot.llm_workflow_report["llm_safe_approved"] is False
 
@@ -376,6 +382,63 @@ def test_analyze_deobfuscation_reports_unknown_identifiers_separately_from_low_c
     assert result.safety.unknown_identifier_count == 2
     assert result.safety.ambiguous_identifier_count == 0
     assert result.safety.low_confidence_mapping_count == 0
+    identifier_diagnostics = [
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.code == "deobfuscation.unknown_identifier"
+    ]
+    assert len(identifier_diagnostics) == 2
+    assert {diagnostic.code for diagnostic in identifier_diagnostics} == {
+        "deobfuscation.unknown_identifier",
+    }
+    assert {diagnostic.identifier_kind for diagnostic in identifier_diagnostics} == {
+        "column",
+        "table",
+    }
+    assert {diagnostic.statement_anchor for diagnostic in identifier_diagnostics} == {
+        None,
+    }
+    assert {
+        diagnostic.code for diagnostic in result.diagnostics
+    } == {
+        "deobfuscation.unknown_identifier",
+        "deobfuscation.unmatched_statement_anchor",
+    }
+
+
+def test_analyze_deobfuscation_returns_structured_redaction_diagnostics():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users WHERE Status = 'secret';",
+        input_name="input.sql",
+        options=ObfuscationOptions(
+            redact_literals=True,
+            redaction_mode="reversible",
+        ),
+    )
+    edited_sql = prepared.snapshot.obfuscated_sql.replace(
+        "__SQL_OBFUSCATOR_STR_",
+        "__SQL_OBFUSCATOR_STR_BROKEN_",
+        1,
+    )
+
+    result = analyze_deobfuscation(prepared.snapshot, edited_sql)
+
+    assert {diagnostic.code for diagnostic in result.diagnostics} >= {
+        "redaction.unknown_placeholder",
+        "redaction.missing_placeholder",
+    }
+    assert all(
+        diagnostic.severity == "error"
+        for diagnostic in result.diagnostics
+        if diagnostic.code.startswith("redaction.")
+    )
+    assert {
+        diagnostic.statement_anchor
+        for diagnostic in result.diagnostics
+        if diagnostic.code.startswith("redaction.")
+    } == {
+        None,
+    }
 
 
 def test_analyze_deobfuscation_reports_ambiguous_identifiers_separately_from_other_findings():
@@ -401,6 +464,8 @@ def test_analyze_deobfuscation_reports_ambiguous_identifiers_separately_from_oth
     assert result.safety.unknown_placeholder_count == 0
     assert result.safety.missing_placeholder_count == 0
     assert result.safety.low_confidence_mapping_count == 0
+    assert result.diagnostics[0].code == "deobfuscation.ambiguous_identifier"
+    assert result.diagnostics[0].statement_anchor == "stmt_0001"
     with pytest.raises(DeobfuscationSafetyError, match="unresolved mappings"):
         require_safe_deobfuscation(result)
     require_safe_deobfuscation(result, allow_unresolved=True)
@@ -508,3 +573,6 @@ def test_translate_document_returns_structured_failure_result():
 
     assert result.succeeded is False
     assert result.translation.failed_statement_count == 1
+    assert result.diagnostics[0].severity == "error"
+    assert result.diagnostics[0].code == "translation.source_parse_failed"
+    assert result.diagnostics[0].batch_index == 1

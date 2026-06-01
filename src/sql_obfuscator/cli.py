@@ -509,7 +509,11 @@ def _render_llm_safety_decision(
     safety: LlmSafetyDecision,
     llm_safe_requested: bool,
 ) -> None:
-    findings = [*safety.blockers, *safety.warnings]
+    findings = (
+        [diagnostic.message for diagnostic in safety.diagnostics]
+        if safety.diagnostics
+        else [*safety.blockers, *safety.warnings]
+    )
     if not findings:
         return
     detail = _summarize_llm_safe_findings(findings)
