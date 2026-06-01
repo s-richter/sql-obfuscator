@@ -238,6 +238,6 @@ that the SQL behaves the same way on the target database.
 
 ## Related Documents
 
-- [Sharing SQL With an External LLM](LLM_SHARING.md)
-- [Command Reference](COMMAND_REFERENCE.md)
-- [Workspaces and Reports](WORKSPACES.md)
+- [Sharing SQL With an External LLM](llm-sharing.md)
+- [Command Reference](../reference/cli.md)
+- [Workspaces and Reports](../reference/workspaces-and-reports.md)

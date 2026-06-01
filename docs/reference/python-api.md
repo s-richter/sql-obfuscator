@@ -79,7 +79,7 @@ except LlmSafetyError as exc:
 ```
 
 `llm_safe=True` rejects known higher-risk visible content. It does not enable redaction
-automatically. See [Sharing SQL With an External LLM](LLM_SHARING.md).
+automatically. See [Sharing SQL With an External LLM](../guides/llm-sharing.md).
 
 ## Save And Load A Workspace
 
@@ -100,7 +100,7 @@ snapshot = load_workspace_snapshot(Path("script.obf"))
 ```
 
 The filesystem helpers preserve the workspace layout and integrity checks described in
-[Workspaces and Reports](WORKSPACES.md).
+[Workspaces and Reports](workspaces-and-reports.md).
 
 ## Apply Structured LLM Edits
 
@@ -187,6 +187,6 @@ adding tenant-scoped storage, opaque workspace IDs, request handling, and resour
 
 ## Related Documents
 
-- [Sharing SQL With an External LLM](LLM_SHARING.md)
-- [Workspaces and Reports](WORKSPACES.md)
-- [Command Reference](COMMAND_REFERENCE.md)
+- [Sharing SQL With an External LLM](../guides/llm-sharing.md)
+- [Workspaces and Reports](workspaces-and-reports.md)
+- [Command Reference](cli.md)

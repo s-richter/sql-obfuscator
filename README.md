@@ -38,8 +38,8 @@ python obfuscator.py --help
 | Restore an LLM-edited script     | [Restore edited SQL](#restore-edited-sql)                         |
 | Translate between T-SQL and Hive | [Translate SQL](#translate-sql)                                   |
 
-For worked examples, see [the command tutorial](docs/COMMAND_TUTORIAL.md). For every flag,
-see [the command reference](docs/COMMAND_REFERENCE.md).
+For worked examples, see [the command tutorial](docs/guides/command-tutorial.md). For every
+flag, see [the command reference](docs/reference/cli.md).
 
 ## Basic Obfuscation
 
@@ -91,7 +91,7 @@ If the command succeeds, send only:
 Do not send the entire workspace. It contains the original SQL and restoration metadata.
 
 For the full workflow, redaction choices, and an explanation of safety errors, read
-[Sharing SQL With an External LLM](docs/LLM_SHARING.md).
+[Sharing SQL With an External LLM](docs/guides/llm-sharing.md).
 
 ## Restore Edited SQL
 
@@ -135,18 +135,20 @@ Most commands create or use a workspace such as `script.obf/`. A workspace store
 original SQL, obfuscated SQL, mappings needed for restoration, generated LLM instructions,
 and diagnostic reports.
 
-Treat the workspace as sensitive local data. See [Workspaces and Reports](docs/WORKSPACES.md)
-for its file layout and integrity checks.
+Treat the workspace as sensitive local data. See
+[Workspaces and Reports](docs/reference/workspaces-and-reports.md) for its file layout and
+integrity checks.
 
 ## Documentation
 
-- [Sharing SQL With an External LLM](docs/LLM_SHARING.md): privacy guidance and edit workflow
-- [Command Tutorial](docs/COMMAND_TUTORIAL.md): worked examples for common tasks
-- [Command Reference](docs/COMMAND_REFERENCE.md): commands, flags, output modes, and exit behavior
-- [Workspaces and Reports](docs/WORKSPACES.md): workspace files, reports, and integrity checks
-- [Troubleshooting](docs/TROUBLESHOOTING.md): common failures and recovery steps
-- [Python Workflow API](docs/PYTHON_API.md): in-process integration API
-- [LLM Use Cases](use%20cases.md): appropriate tasks and workflow selection
+- [Documentation Index](docs/README.md): all guides, reference material, and maintainer notes
+- [Sharing SQL With an External LLM](docs/guides/llm-sharing.md): privacy guidance and edit workflow
+- [Command Tutorial](docs/guides/command-tutorial.md): worked examples for common tasks
+- [Command Reference](docs/reference/cli.md): commands, flags, output modes, and exit behavior
+- [Workspaces and Reports](docs/reference/workspaces-and-reports.md): workspace files, reports, and integrity checks
+- [Troubleshooting](docs/guides/troubleshooting.md): common failures and recovery steps
+- [Python Workflow API](docs/reference/python-api.md): in-process integration API
+- [LLM Use Cases](docs/guides/use-cases.md): appropriate tasks and workflow selection
 
 ## Current Limits
 

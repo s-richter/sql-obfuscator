@@ -21,10 +21,10 @@ your immediate goal, then follow links to the detailed reference only when neede
 
 Detailed documentation:
 
-- [Sharing SQL With an External LLM](LLM_SHARING.md)
-- [Command Reference](COMMAND_REFERENCE.md)
-- [Workspaces and Reports](WORKSPACES.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- [Sharing SQL With an External LLM](llm-sharing.md)
+- [Command Reference](../reference/cli.md)
+- [Workspaces and Reports](../reference/workspaces-and-reports.md)
+- [Troubleshooting](troubleshooting.md)
 
 ## A Few Terms
 
@@ -37,7 +37,7 @@ Detailed documentation:
 | dry run | A validation pass that prints diagnostics without writing restored SQL. |
 
 For external-sharing terminology such as `--llm-safe`, fail-closed behavior, bounded edits,
-and expert mode, see [the LLM-sharing guide](LLM_SHARING.md).
+and expert mode, see [the LLM-sharing guide](llm-sharing.md).
 
 ## 1. Basic Obfuscation
 
@@ -123,7 +123,7 @@ sample.obf/llm_instructions.md
 Do not send the entire workspace. It contains the original SQL and restoration metadata.
 
 For the exact safety checks and limitations, read
-[Sharing SQL With an External LLM](LLM_SHARING.md).
+[Sharing SQL With an External LLM](llm-sharing.md).
 
 ## 4. Use Reversible Literal Redaction
 
@@ -253,7 +253,7 @@ Validation may report:
 | ambiguous | More than one restoration target is possible. |
 | low-confidence | A likely match exists, but structural edits reduced confidence. |
 
-See [Troubleshooting](TROUBLESHOOTING.md) before considering override flags.
+See [Troubleshooting](troubleshooting.md) before considering override flags.
 
 ## 7. Run A Roundtrip Check
 
@@ -305,7 +305,8 @@ This command:
 - lists available artifacts and reports
 - shows external-sharing privacy flags when present
 
-Read [Workspaces and Reports](WORKSPACES.md) for the complete file layout.
+Read [Workspaces and Reports](../reference/workspaces-and-reports.md) for the complete file
+layout.
 
 ## 10. Use Stdin And Output Options
 
@@ -335,7 +336,7 @@ Write generated SQL into a chosen folder:
 python obfuscator.py obfuscate sample.sql --output-dir artifacts/sql
 ```
 
-For translation output combinations, see [the command reference](COMMAND_REFERENCE.md#output-rules).
+For translation output combinations, see [the command reference](../reference/cli.md#output-rules).
 
 ## 11. Check `GO` Separators
 
@@ -361,6 +362,6 @@ GO extra_text
 
 ## Next Steps
 
-- Use [the command reference](COMMAND_REFERENCE.md) for all flags.
-- Use [the LLM-sharing guide](LLM_SHARING.md) before sending SQL externally.
-- Use [the troubleshooting guide](TROUBLESHOOTING.md) when a command fails.
+- Use [the command reference](../reference/cli.md) for all flags.
+- Use [the LLM-sharing guide](llm-sharing.md) before sending SQL externally.
+- Use [the troubleshooting guide](troubleshooting.md) when a command fails.

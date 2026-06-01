@@ -116,7 +116,7 @@ Acceptance criteria:
 ### Documentation Synchronization
 
 - [x] Update `README.md` command reference after each feature merge.
-- [x] Update `docs/COMMAND_TUTORIAL.md` with one realistic example per new capability.
+- [x] Update `docs/guides/command-tutorial.md` with one realistic example per new capability.
 - [x] Track known limitations in a single `Current Limits` section.
 
 ## Suggested Delivery Sequence

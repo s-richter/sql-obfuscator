@@ -303,7 +303,7 @@ LLM output carefully, and run `deobfuscate --dry-run` before writing restored SQ
 
 ## Related Documents
 
-- [Command Tutorial](COMMAND_TUTORIAL.md)
-- [Command Reference](COMMAND_REFERENCE.md)
-- [Workspaces and Reports](WORKSPACES.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- [Command Tutorial](command-tutorial.md)
+- [Command Reference](../reference/cli.md)
+- [Workspaces and Reports](../reference/workspaces-and-reports.md)
+- [Troubleshooting](troubleshooting.md)

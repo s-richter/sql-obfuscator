@@ -1,3 +1,5 @@
+Contains some loose thoughts, needs more structure and definitions
+
 - Error messages - obfuscate
 - use cases - differentiate, analyze
 - GUI

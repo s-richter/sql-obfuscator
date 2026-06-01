@@ -1,7 +1,7 @@
 # Command Reference
 
 This page lists the CLI commands, flags, output behavior, and common flag constraints.
-For step-by-step examples, see [the command tutorial](COMMAND_TUTORIAL.md).
+For step-by-step examples, see [the command tutorial](../guides/command-tutorial.md).
 
 ## Invocation
 
@@ -81,7 +81,8 @@ script.obf/
 SQL file write, not stdout or workspace creation.
 
 When `--llm-safe` rejects a script, the workspace is still written for local inspection but
-the sibling SQL output file is not written. See [Sharing SQL With an External LLM](LLM_SHARING.md).
+the sibling SQL output file is not written. See
+[Sharing SQL With an External LLM](../guides/llm-sharing.md).
 
 ## `apply-llm-edits`
 
@@ -293,7 +294,7 @@ cat script.sql | python obfuscator.py translate --input - --source-dialect tsql 
 
 ## Related Documents
 
-- [Command Tutorial](COMMAND_TUTORIAL.md)
-- [Sharing SQL With an External LLM](LLM_SHARING.md)
-- [Workspaces and Reports](WORKSPACES.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- [Command Tutorial](../guides/command-tutorial.md)
+- [Sharing SQL With an External LLM](../guides/llm-sharing.md)
+- [Workspaces and Reports](workspaces-and-reports.md)
+- [Troubleshooting](../guides/troubleshooting.md)

@@ -5,7 +5,7 @@ Date: 2026-05-31
 ## Scope
 
 Compared the user-facing documentation, especially `README.md` and
-`docs/COMMAND_TUTORIAL.md`, against the CLI, workflow, privacy, redaction, and
+`docs/guides/command-tutorial.md`, against the CLI, workflow, privacy, redaction, and
 workspace implementations. Also reviewed tracked specs, plans, and TODO notes
 for documents that still present stale information as current.
 
@@ -46,7 +46,7 @@ Recommended action:
 
 ### 2. Resolved: tutorial strict-`GO` failure example did not fail
 
-`docs/COMMAND_TUTORIAL.md:792-817` previously presented this as an invalid
+`docs/guides/command-tutorial.md:792-817` previously presented this as an invalid
 strict case:
 
 ```sql
@@ -70,15 +70,15 @@ SELECT 2;
 
 ### 3. Resolved: the "Current State" recreation spec was outdated
 
-`specs/specs_2026_02_18.md` previously labeled itself as the current state, but
+`docs/archive/specs/recreation-spec-2026-02-18.md` previously labeled itself as the current state, but
 its preserved historical body no longer matches the codebase. Examples:
 
-- `specs/specs_2026_02_18.md:35-36` documents legacy invocation and only four
+- `docs/archive/specs/recreation-spec-2026-02-18.md:35-36` documents legacy invocation and only four
   subcommands.
-- `specs/specs_2026_02_18.md:61-64` documents legacy CLI fallback that no
+- `docs/archive/specs/recreation-spec-2026-02-18.md:61-64` documents legacy CLI fallback that no
   longer exists.
-- `specs/specs_2026_02_18.md:77` says `--strict-go` is a no-op.
-- `specs/specs_2026_02_18.md:130-136` describes animal-only generated names,
+- `docs/archive/specs/recreation-spec-2026-02-18.md:77` says `--strict-go` is a no-op.
+- `docs/archive/specs/recreation-spec-2026-02-18.md:130-136` describes animal-only generated names,
   while the current generator uses adjective-animal combinations.
 
 The current CLI includes `obfuscate`, `deobfuscate`, `validate-before-write`,
@@ -90,12 +90,12 @@ Resolution:
   snapshot and added a warning that directs readers to maintained usage docs,
   current source, and tests for the live contract.
 
-### 4. Medium: `use cases.md` needs bounded-edit guardrails
+### 4. Medium: `docs/guides/use-cases.md` needs bounded-edit guardrails
 
-`use cases.md` suggests broad LLM rewrites such as alias standardization,
+`docs/guides/use-cases.md` suggests broad LLM rewrites such as alias standardization,
 splitting scripts, CTE restructuring, and statement reordering. Those are
 reasonable expert-mode use cases, but they conflict with the recommended
-bounded-edit workflow described in `docs/COMMAND_TUTORIAL.md:314-370`.
+bounded-edit workflow described in `docs/guides/command-tutorial.md:314-370`.
 
 Recommended action:
 
@@ -105,7 +105,7 @@ Recommended action:
 
 ### 5. Low: redaction policy documentation is incomplete
 
-`README.md:266` and `docs/COMMAND_TUTORIAL.md:408` list
+`README.md:266` and `docs/guides/command-tutorial.md:408` list
 `all|strings-only|sensitive`, but do not fully define their behavior.
 
 The implementation in `src/sql_obfuscator/redaction.py:190-194` behaves as
@@ -166,9 +166,9 @@ Recommended action:
 - Align `pyproject.toml` with the supported runtime range, or
 - Document why the optional `requirements.txt` constraint is stricter.
 
-### 8. Low: `TODOs.md` contains completed items
+### 8. Low: `docs/maintainers/TODOs.md` contains completed items
 
-`TODOs.md` still lists prompt preparation, LLM instructions, use-case work, and
+`docs/maintainers/TODOs.md` still lists prompt preparation, LLM instructions, use-case work, and
 stress tests as open-ended TODOs. The current codebase already includes
 generated `llm_instructions.md`, structured `apply-llm-edits`, a use-case
 document, and a broad fixture/test corpus.

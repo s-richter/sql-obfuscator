@@ -4,7 +4,7 @@
 > This document is a historical snapshot from 2026-02-18. It does not describe
 > the current application contract and must not be used to rebuild current
 > feature parity. For maintained usage documentation, see `README.md` and
-> `docs/COMMAND_TUTORIAL.md`. For exact behavior, use the current source and
+> `docs/guides/command-tutorial.md`. For exact behavior, use the current source and
 > tests.
 
 This document preserves the application state captured on 2026-02-18 for

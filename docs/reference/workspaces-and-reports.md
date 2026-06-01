@@ -105,7 +105,7 @@ It contains:
 - occurrence counts and examples
 - privacy-audit parse errors, when applicable
 
-See [Sharing SQL With an External LLM](LLM_SHARING.md) for interpretation.
+See [Sharing SQL With an External LLM](../guides/llm-sharing.md) for interpretation.
 
 ### `llm_workflow_report.json`
 
@@ -202,6 +202,6 @@ This validates integrity and prints:
 
 ## Related Documents
 
-- [Sharing SQL With an External LLM](LLM_SHARING.md)
-- [Command Reference](COMMAND_REFERENCE.md)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- [Sharing SQL With an External LLM](../guides/llm-sharing.md)
+- [Command Reference](cli.md)
+- [Troubleshooting](../guides/troubleshooting.md)

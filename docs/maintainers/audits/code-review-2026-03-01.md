@@ -22,7 +22,7 @@ Verification performed:
 
 - Static review of the main modules under `src/sql_obfuscator/`
 - Review of the test suite under `tests/`
-- Review of `README.md`, `docs/COMMAND_TUTORIAL.md`, and packaging metadata
+- Review of `README.md`, `docs/guides/command-tutorial.md`, and packaging metadata
 - Selective test execution in the local environment
 
 Execution note:
@@ -91,8 +91,8 @@ Files:
 - `src/sql_obfuscator/workspace.py:253-268`
 - `README.md:80-85`
 - `README.md:328-335`
-- `docs/COMMAND_TUTORIAL.md:556-565`
-- `docs/COMMAND_TUTORIAL.md:664-664`
+- `docs/guides/command-tutorial.md:556-565`
+- `docs/guides/command-tutorial.md:664-664`
 
 `_run_translate_command()` saves translation artifacts before checking whether translation/validation failed, and it passes `translated_sql` whenever `args.out is None and not args.report_only`. That has two problematic effects:
 
@@ -110,7 +110,7 @@ This also conflicts with the docs, which currently say:
 
 - "Translate from file and print translated SQL only" in `README.md:80-85`
 - "`--stdout-only`: print translated SQL to stdout without writing translated SQL output files" in `README.md:328-335`
-- Similar wording in `docs/COMMAND_TUTORIAL.md`
+- Similar wording in `docs/guides/command-tutorial.md`
 
 Resolution:
 

@@ -15,7 +15,7 @@ change before automatic restoration becomes unreliable.
 | Local translation | You need structural T-SQL/Hive conversion. | Use `translate --validate`; test behavior on the target database. |
 
 For external sharing, start with
-[Sharing SQL With an External LLM](docs/LLM_SHARING.md).
+[Sharing SQL With an External LLM](llm-sharing.md).
 
 ## Read-Only Review Tasks
 
@@ -160,7 +160,7 @@ Generated SQL still requires review and execution in an appropriate test environ
 
 ## Related Documents
 
-- [Sharing SQL With an External LLM](docs/LLM_SHARING.md)
-- [Command Tutorial](docs/COMMAND_TUTORIAL.md)
-- [Command Reference](docs/COMMAND_REFERENCE.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Sharing SQL With an External LLM](llm-sharing.md)
+- [Command Tutorial](command-tutorial.md)
+- [Command Reference](../reference/cli.md)
+- [Troubleshooting](troubleshooting.md)
