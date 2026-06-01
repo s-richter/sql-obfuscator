@@ -9,6 +9,16 @@ Compared the user-facing documentation, especially `README.md` and
 workspace implementations. Also reviewed tracked specs, plans, and TODO notes
 for documents that still present stale information as current.
 
+## Current Status
+
+- Resolved: findings 1-8.
+- Open audit findings: none.
+- Local environment note: reinstall the editable package if an existing
+  `.venv\Scripts\sql-obfuscator.exe` entry point becomes stale.
+
+Line-number references below record locations at audit time. Maintained
+documentation has since been reorganized, so current line numbers may differ.
+
 ## Findings
 
 ### 1. Resolved: `--llm-safe` failed for normal multi-batch T-SQL
@@ -38,7 +48,7 @@ Observed result:
 Error: LLM-safe validation failed: The privacy audit could not parse the obfuscated output for a full identifier-surface check.
 ```
 
-Recommended action:
+Resolution:
 
 - Resolved on 2026-05-31: the privacy audit now parses each dialect-profile
   batch independently before combining statements for surface analysis.
@@ -90,20 +100,22 @@ Resolution:
   snapshot and added a warning that directs readers to maintained usage docs,
   current source, and tests for the live contract.
 
-### 4. Medium: `docs/guides/use-cases.md` needs bounded-edit guardrails
+### 4. Resolved: `docs/guides/use-cases.md` needed bounded-edit guardrails
 
 `docs/guides/use-cases.md` suggests broad LLM rewrites such as alias standardization,
 splitting scripts, CTE restructuring, and statement reordering. Those are
 reasonable expert-mode use cases, but they conflict with the recommended
 bounded-edit workflow described in `docs/guides/command-tutorial.md:314-370`.
 
-Recommended action:
+Resolution:
 
-- Separate analysis-only use cases from edit-producing use cases.
-- Mark structural rewrites and alias changes as expert-mode workflows.
-- Point edit-producing workflows to `apply-llm-edits`.
+- Resolved on 2026-06-01: separated read-only review, small restorable
+  edits, and manual-review rewrites.
+- Marked structural rewrites as expert-mode workflows that require explicit
+  human review.
+- Pointed small edit-producing workflows to `apply-llm-edits`.
 
-### 5. Low: redaction policy documentation is incomplete
+### 5. Resolved: redaction policy documentation was incomplete
 
 `README.md:266` and `docs/guides/command-tutorial.md:408` list
 `all|strings-only|sensitive`, but do not fully define their behavior.
@@ -121,12 +133,14 @@ The workspace artifact description also needs a nuance: `redaction.json` and
 least one literal placeholder (`src/sql_obfuscator/redaction.py:98-104`), not
 merely whenever reversible mode is selected.
 
-Recommended action:
+Resolution:
 
-- Add a compact policy table to `README.md` and the tutorial.
-- Clarify the conditional creation of reversible redaction artifacts.
+- Resolved on 2026-06-01: added a compact policy table to
+  `docs/guides/llm-sharing.md`.
+- Clarified in `docs/reference/workspaces-and-reports.md` that reversible
+  redaction artifacts are written only when placeholders exist.
 
-### 6. Low: integrity documentation is incomplete
+### 6. Resolved: integrity documentation was incomplete
 
 `README.md:245` says integrity failures affect `deobfuscate`, `roundtrip`, and
 `workspace-info`.
@@ -140,12 +154,14 @@ Existing workspace snapshots are also loaded and integrity-checked by:
 `roundtrip` normally creates and immediately reloads a fresh workspace, rather
 than consuming an existing workspace.
 
-Recommended action:
+Resolution:
 
-- Update the integrity section to distinguish commands that validate existing
-  workspaces from `roundtrip`, which validates the fresh workspace it creates.
+- Resolved on 2026-06-01: documented integrity checks for commands that load
+  existing workspaces in `docs/reference/workspaces-and-reports.md`.
+- Clarified in `docs/reference/cli.md` that `roundtrip` creates and immediately
+  restores a workspace for verification.
 
-### 7. Low: installation dependency constraints differ
+### 7. Resolved: installation dependency constraints differed
 
 `README.md:24` recommends:
 
@@ -161,29 +177,31 @@ However:
 CI installs the editable package through `pip install -e .[dev]`, so it uses
 the broader dependency constraint.
 
-Recommended action:
+Resolution:
 
-- Align `pyproject.toml` with the supported runtime range, or
-- Document why the optional `requirements.txt` constraint is stricter.
+- Resolved on 2026-06-01: aligned `pyproject.toml` with the supported
+  `sqlglot>=28,<29` runtime range already declared in `requirements.txt`.
 
-### 8. Low: `docs/maintainers/TODOs.md` contains completed items
+### 8. Resolved: `docs/maintainers/TODOs.md` contained completed items
 
 `docs/maintainers/TODOs.md` still lists prompt preparation, LLM instructions, use-case work, and
 stress tests as open-ended TODOs. The current codebase already includes
 generated `llm_instructions.md`, structured `apply-llm-edits`, a use-case
 document, and a broad fixture/test corpus.
 
-Recommended action:
+Resolution:
 
-- Remove completed entries.
-- Rewrite remaining entries as scoped work items or link them to issues.
+- Resolved on 2026-06-01: removed completed entries and rewrote remaining
+  thoughts as scoped triage items.
+- Linked GUI work to the existing implementation plan.
 
-## Environment Note
+## Environment Note: local editable install can become stale
 
-The checked-in source currently exposes `apply-llm-edits`, but the installed
-`.venv\Scripts\sql-obfuscator.exe` entry point in the audited environment came
-from an older editable install and did not expose that command. Running the
-wrapper script (`python obfuscator.py`) loaded the checked-in source correctly.
+Reconfirmed on 2026-06-01: the checked-in source exposed `apply-llm-edits`, but
+the installed `.venv\Scripts\sql-obfuscator.exe` entry point in the audited
+environment came from an older editable install and did not expose that
+command. Running the wrapper script (`python obfuscator.py`) loaded the
+checked-in source correctly.
 
 Recommended action:
 
@@ -192,6 +210,9 @@ Recommended action:
 ```powershell
 .venv\Scripts\python.exe -m pip install -e .
 ```
+
+Resolved locally on 2026-06-01: refreshed the editable install and verified
+that `.venv\Scripts\sql-obfuscator.exe --help` exposes `apply-llm-edits`.
 
 ## Verification
 
@@ -202,5 +223,6 @@ The existing automated checks pass:
 .venv\Scripts\pytest.exe tests/test_docs_consistency.py -q
 ```
 
-The current docs consistency test checks a limited flag subset and does not
-cover the behavior-level mismatches above.
+The docs consistency test checks selected documentation contracts, including
+key CLI flags and translation output semantics. It does not replace periodic
+behavior-level documentation audits.

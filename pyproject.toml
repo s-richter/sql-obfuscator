@@ -9,7 +9,7 @@ description = "AST-based SQL identifier obfuscator for T-SQL and Hive scripts."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "sqlglot>=26.0.0",
+  "sqlglot>=28,<29",
 ]
 
 [project.optional-dependencies]
