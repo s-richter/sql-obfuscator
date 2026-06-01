@@ -105,6 +105,28 @@ snapshot = load_workspace_snapshot(Path("script.obf"))
 The filesystem helpers preserve the workspace layout and integrity checks described in
 [Workspaces and Reports](workspaces-and-reports.md).
 
+For a desktop host that persists local workspace folders, use the explicit local adapter:
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_workspace_store import LocalWorkspaceStore
+
+store = LocalWorkspaceStore()
+store.save_workspace_snapshot(
+    workspace_path=Path("script.obf"),
+    input_path=Path("script.sql"),
+    original_sql=prepared.original_sql,
+    snapshot=prepared.snapshot,
+    instructions_text=prepared.instructions_text,
+)
+snapshot = store.load_workspace_snapshot(Path("script.obf"))
+```
+
+The functions in `sql_obfuscator.workspace` remain available as compatibility delegators
+to `LocalWorkspaceStore`. A future web host can provide tenant-scoped persistence without
+changing the host-neutral workflow operations.
+
 ## Apply Structured LLM Edits
 
 ```python

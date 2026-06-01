@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sql_obfuscator.errors import WorkspaceError
+from sql_obfuscator.local_workspace_store import LocalWorkspaceStore
 from sql_obfuscator.workflow import ObfuscationOptions, prepare_workspace
 from sql_obfuscator.workspace import (
     WorkspaceSnapshot,
@@ -28,6 +29,52 @@ def test_default_workspace_path_uses_stem(tmp_path: Path):
     input_path = tmp_path / "sample.sql"
     workspace = default_workspace_path(input_path)
     assert workspace == tmp_path / "sample.obf"
+
+
+def test_local_workspace_store_saves_and_loads_snapshot(tmp_path: Path):
+    store = LocalWorkspaceStore()
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+        options=ObfuscationOptions(seed=42),
+    )
+
+    store.save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+        instructions_text=prepared.instructions_text,
+    )
+
+    assert store.load_workspace_snapshot(workspace_path) == prepared.snapshot
+    assert store.default_workspace_path(input_path) == workspace_path
+
+
+def test_local_workspace_store_rejects_integrity_tampering(tmp_path: Path):
+    store = LocalWorkspaceStore()
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+    )
+    store.save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+    )
+    mapping_path = workspace_path / "mapping.json"
+    mapping_path.write_text(
+        mapping_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="Integrity check failed"):
+        store.load_workspace_snapshot(workspace_path)
 
 
 def test_save_and_load_workspace_snapshot_preserves_prepared_workspace(tmp_path: Path):

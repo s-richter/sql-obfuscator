@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -149,8 +147,14 @@ class WorkspaceSnapshot:
     llm_workflow_report: dict[str, Any]
 
 
+def _local_workspace_store():
+    from .local_workspace_store import LocalWorkspaceStore
+
+    return LocalWorkspaceStore()
+
+
 def default_workspace_path(input_path: Path) -> Path:
-    return input_path.with_name(f"{input_path.stem}.obf")
+    return _local_workspace_store().default_workspace_path(input_path)
 
 
 def save_workspace_snapshot(
@@ -161,50 +165,17 @@ def save_workspace_snapshot(
     snapshot: WorkspaceSnapshot,
     instructions_text: str | None = None,
 ) -> None:
-    save_workspace_artifacts(
+    _local_workspace_store().save_workspace_snapshot(
         workspace_path=workspace_path,
         input_path=input_path,
         original_sql=original_sql,
-        obfuscated_sql=snapshot.obfuscated_sql,
-        mapping_payload=snapshot.mapping_payload,
-        context_payload=snapshot.context_payload,
-        llm_instructions_text=instructions_text,
-        redaction_payload=snapshot.redaction_payload,
-        llm_workflow_report_payload=snapshot.llm_workflow_report or None,
-        privacy_summary_payload=snapshot.privacy_summary or None,
+        snapshot=snapshot,
+        instructions_text=instructions_text,
     )
 
 
 def load_workspace_snapshot(workspace_path: Path) -> WorkspaceSnapshot:
-    validate_workspace_integrity(workspace_path)
-    redaction_path = workspace_path / "redaction.json"
-    privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
-    llm_workflow_report_path = workspace_path / "reports" / "llm_workflow_report.json"
-    context_payload = load_context_payload(workspace_path / "context.json")
-    return WorkspaceSnapshot(
-        obfuscated_sql=_read_text(workspace_path / "obfuscated.sql"),
-        mapping_payload=load_mapping_payload(workspace_path / "mapping.json"),
-        context_payload={
-            key: value
-            for key, value in context_payload.items()
-            if key != "input_file"
-        },
-        redaction_payload=(
-            load_redaction_payload(redaction_path)
-            if redaction_path.exists()
-            else None
-        ),
-        privacy_summary=(
-            load_privacy_summary_report(privacy_summary_path)
-            if privacy_summary_path.exists()
-            else {}
-        ),
-        llm_workflow_report=(
-            load_llm_workflow_report(llm_workflow_report_path)
-            if llm_workflow_report_path.exists()
-            else {}
-        ),
-    )
+    return _local_workspace_store().load_workspace_snapshot(workspace_path)
 
 
 def save_workspace_artifacts(
@@ -220,119 +191,42 @@ def save_workspace_artifacts(
     llm_workflow_report_payload: dict[str, Any] | None = None,
     privacy_summary_payload: dict[str, Any] | None = None,
 ) -> None:
-    try:
-        workspace_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create workspace: {workspace_path}") from exc
-
-    _write_text(workspace_path / "original.sql", original_sql)
-    _write_text(workspace_path / "obfuscated.sql", obfuscated_sql)
-    _write_text(
-        workspace_path / "llm_instructions.md",
-        llm_instructions_text
-        if llm_instructions_text is not None
-        else build_default_llm_instructions(
-            input_name=input_path.name,
-            dialect=context_payload.get("dialect", "tsql"),
-            statement_anchors=context_payload.get("statement_anchors"),
-        ),
-    )
-    _write_json(workspace_path / "mapping.schema.json", MAPPING_JSON_SCHEMA)
-    _write_json(workspace_path / "context.schema.json", CONTEXT_JSON_SCHEMA)
-    _write_json(workspace_path / "integrity.schema.json", INTEGRITY_JSON_SCHEMA)
-
-    context = dict(context_payload)
-    context.update(
-        {
-            "schema_version": CONTEXT_SCHEMA_VERSION,
-            "input_file": str(input_path),
-        }
-    )
-    _write_json(workspace_path / "mapping.json", mapping_payload)
-    _write_json(workspace_path / "context.json", context)
-    tracked_files = list(INTEGRITY_TRACKED_FILES)
-    if redaction_payload is not None:
-        _write_json(workspace_path / "redaction.schema.json", REDACTION_JSON_SCHEMA)
-        _write_json(workspace_path / "redaction.json", redaction_payload)
-        tracked_files.append("redaction.json")
-    else:
-        _remove_if_exists(workspace_path / "redaction.json")
-        _remove_if_exists(workspace_path / "redaction.schema.json")
-    if llm_workflow_report_payload is not None:
-        save_llm_workflow_report(
-            workspace_path=workspace_path,
-            report_payload=llm_workflow_report_payload,
-        )
-    else:
-        _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.json")
-        _remove_if_exists(workspace_path / "reports" / "llm_workflow_report.schema.json")
-    if privacy_summary_payload is not None:
-        save_privacy_summary_report(
-            workspace_path=workspace_path,
-            report_payload=privacy_summary_payload,
-        )
-    else:
-        _remove_if_exists(workspace_path / "reports" / "privacy_summary.json")
-        _remove_if_exists(workspace_path / "reports" / "privacy_summary.schema.json")
-    _write_json(
-        workspace_path / "integrity.json",
-        _build_integrity_payload(workspace_path, tracked_files=tracked_files),
+    _local_workspace_store().save_workspace_artifacts(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=original_sql,
+        obfuscated_sql=obfuscated_sql,
+        mapping_payload=mapping_payload,
+        context_payload=context_payload,
+        llm_instructions_text=llm_instructions_text,
+        redaction_payload=redaction_payload,
+        llm_workflow_report_payload=llm_workflow_report_payload,
+        privacy_summary_payload=privacy_summary_payload,
     )
 
 
 def load_mapping_payload(mapping_path: Path) -> dict[str, Any]:
-    payload = _read_json(mapping_path)
-    _validate_mapping_payload(payload, source=mapping_path)
-    return payload
+    return _local_workspace_store().load_mapping_payload(mapping_path)
 
 
 def load_context_payload(context_path: Path) -> dict[str, Any]:
-    payload = _read_json(context_path)
-    _validate_context_payload(payload, source=context_path)
-    return payload
+    return _local_workspace_store().load_context_payload(context_path)
 
 
 def load_redaction_payload(redaction_path: Path) -> dict[str, Any]:
-    payload = _read_json(redaction_path)
-    _validate_redaction_payload(payload, source=redaction_path)
-    return payload
+    return _local_workspace_store().load_redaction_payload(redaction_path)
 
 
 def load_llm_workflow_report(report_path: Path) -> dict[str, Any]:
-    payload = _read_json(report_path)
-    _validate_llm_workflow_report_payload(payload, source=report_path)
-    return payload
+    return _local_workspace_store().load_llm_workflow_report(report_path)
 
 
 def load_privacy_summary_report(report_path: Path) -> dict[str, Any]:
-    payload = _read_json(report_path)
-    _validate_privacy_summary_report_payload(payload, source=report_path)
-    return payload
+    return _local_workspace_store().load_privacy_summary_report(report_path)
 
 
 def validate_workspace_integrity(workspace_path: Path) -> dict[str, Any]:
-    integrity_path = workspace_path / "integrity.json"
-    payload = _read_json(integrity_path)
-    _validate_integrity_payload(payload, source=integrity_path)
-    if payload.get("algorithm") != "sha256":
-        raise WorkspaceError(
-            f"Unsupported integrity algorithm in {integrity_path}: {payload.get('algorithm')}"
-        )
-
-    files = payload.get("files", {})
-    for rel_path, expected_hash in files.items():
-        if not isinstance(rel_path, str) or not isinstance(expected_hash, str):
-            raise WorkspaceError(f"Invalid integrity entry in {integrity_path}: {rel_path}")
-        target = workspace_path / rel_path
-        if not target.exists():
-            raise WorkspaceError(f"Integrity check failed: missing file {target}")
-        actual_hash = _sha256_file(target)
-        if actual_hash != expected_hash:
-            raise WorkspaceError(
-                "Integrity check failed: checksum mismatch for "
-                f"{target}. Expected {expected_hash}, got {actual_hash}."
-            )
-    return payload
+    return _local_workspace_store().validate_workspace_integrity(workspace_path)
 
 
 def save_deobfuscation_artifacts(
@@ -341,38 +235,10 @@ def save_deobfuscation_artifacts(
     deobfuscated_sql: str,
     report_payload: dict[str, Any],
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_text(workspace_path / "deobfuscated.sql", deobfuscated_sql)
-    _write_json(reports_path / "deobfuscation_report.json", report_payload)
-    _write_text(
-        reports_path / "coverage_report.txt",
-        "\n".join(
-            [
-                f"mapped_identifiers: {report_payload.get('mapped_identifiers', 0)}",
-                f"unknown_count: {report_payload.get('unknown_count', 0)}",
-                f"ambiguous_count: {report_payload.get('ambiguous_count', 0)}",
-                f"low_confidence_count: {report_payload.get('low_confidence_count', 0)}",
-                f"matched_statement_anchor_count: {report_payload.get('matched_statement_anchor_count', 0)}",
-                f"unmatched_statement_anchor_count: {report_payload.get('unmatched_statement_anchor_count', 0)}",
-                f"batch_count: {report_payload.get('batch_count', 0)}",
-                f"statement_count: {report_payload.get('statement_count', 0)}",
-                f"unknown_by_kind: {report_payload.get('unknown_by_kind', {})}",
-                f"ambiguous_by_kind: {report_payload.get('ambiguous_by_kind', {})}",
-                f"low_confidence_by_kind: {report_payload.get('low_confidence_by_kind', {})}",
-                "recommendations:",
-                *[
-                    f"- {line}"
-                    for line in report_payload.get("recommendations", [])
-                    if isinstance(line, str)
-                ],
-            ]
-        )
-        + "\n",
+    _local_workspace_store().save_deobfuscation_artifacts(
+        workspace_path=workspace_path,
+        deobfuscated_sql=deobfuscated_sql,
+        report_payload=report_payload,
     )
 
 
@@ -385,21 +251,14 @@ def save_roundtrip_reports(
     deobfuscated_pretty_sql: str | None = None,
     normalized_diff_text: str | None = None,
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_json(reports_path / "roundtrip_report.json", report_payload)
-    if diff_text is not None:
-        _write_text(reports_path / "roundtrip_diff.txt", diff_text)
-    if original_pretty_sql is not None:
-        _write_text(reports_path / "original_pretty.sql", original_pretty_sql)
-    if deobfuscated_pretty_sql is not None:
-        _write_text(reports_path / "deobfuscated_pretty.sql", deobfuscated_pretty_sql)
-    if normalized_diff_text is not None:
-        _write_text(reports_path / "roundtrip_normalized_diff.txt", normalized_diff_text)
+    _local_workspace_store().save_roundtrip_reports(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+        diff_text=diff_text,
+        original_pretty_sql=original_pretty_sql,
+        deobfuscated_pretty_sql=deobfuscated_pretty_sql,
+        normalized_diff_text=normalized_diff_text,
+    )
 
 
 def save_translation_artifacts(
@@ -408,18 +267,11 @@ def save_translation_artifacts(
     report_payload: dict[str, Any],
     translated_sql: str | None = None,
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_json(reports_path / "translation_report.schema.json", TRANSLATION_REPORT_JSON_SCHEMA)
-    _write_json(reports_path / "translation_report.json", report_payload)
-    if translated_sql is not None:
-        _write_text(workspace_path / "translated.sql", translated_sql)
-    else:
-        _remove_if_exists(workspace_path / "translated.sql")
+    _local_workspace_store().save_translation_artifacts(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+        translated_sql=translated_sql,
+    )
 
 
 def save_llm_workflow_report(
@@ -427,14 +279,10 @@ def save_llm_workflow_report(
     workspace_path: Path,
     report_payload: dict[str, Any],
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_json(reports_path / "llm_workflow_report.schema.json", LLM_WORKFLOW_REPORT_JSON_SCHEMA)
-    _write_json(reports_path / "llm_workflow_report.json", report_payload)
+    _local_workspace_store().save_llm_workflow_report(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+    )
 
 
 def save_llm_workflow_report_if_present(
@@ -442,11 +290,10 @@ def save_llm_workflow_report_if_present(
     workspace_path: Path,
     report_payload: dict[str, Any],
 ) -> None:
-    if (workspace_path / "reports" / "llm_workflow_report.json").exists():
-        save_llm_workflow_report(
-            workspace_path=workspace_path,
-            report_payload=report_payload,
-        )
+    _local_workspace_store().save_llm_workflow_report_if_present(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+    )
 
 
 def save_llm_edit_application_report(
@@ -454,17 +301,10 @@ def save_llm_edit_application_report(
     workspace_path: Path,
     report_payload: dict[str, Any],
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_json(
-        reports_path / "llm_edit_application_report.schema.json",
-        LLM_EDIT_APPLICATION_REPORT_JSON_SCHEMA,
+    _local_workspace_store().save_llm_edit_application_report(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
     )
-    _write_json(reports_path / "llm_edit_application_report.json", report_payload)
 
 
 def save_privacy_summary_report(
@@ -472,87 +312,10 @@ def save_privacy_summary_report(
     workspace_path: Path,
     report_payload: dict[str, Any],
 ) -> None:
-    reports_path = workspace_path / "reports"
-    try:
-        reports_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to create reports folder: {reports_path}") from exc
-
-    _write_json(reports_path / "privacy_summary.schema.json", PRIVACY_SUMMARY_REPORT_JSON_SCHEMA)
-    _write_json(reports_path / "privacy_summary.json", report_payload)
-
-
-def _write_text(path: Path, content: str) -> None:
-    try:
-        path.write_text(content, encoding="utf-8")
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to write workspace file: {path}") from exc
-
-
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    try:
-        path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=True) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to write workspace file: {path}") from exc
-
-
-def _read_text(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to read workspace file: {path}") from exc
-
-
-def _remove_if_exists(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        path.unlink()
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to remove stale workspace file: {path}") from exc
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as handle:
-            while True:
-                chunk = handle.read(65536)
-                if not chunk:
-                    break
-                digest.update(chunk)
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to read workspace file for hashing: {path}") from exc
-    return digest.hexdigest()
-
-
-def _build_integrity_payload(workspace_path: Path, *, tracked_files: list[str]) -> dict[str, Any]:
-    files: dict[str, str] = {}
-    for rel_path in tracked_files:
-        target = workspace_path / rel_path
-        files[rel_path] = _sha256_file(target)
-    return {
-        "schema_version": INTEGRITY_SCHEMA_VERSION,
-        "algorithm": "sha256",
-        "files": files,
-    }
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise WorkspaceError(f"Unable to read workspace file: {path}") from exc
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise WorkspaceError(f"Invalid JSON in workspace file: {path}") from exc
-    if not isinstance(payload, dict):
-        raise WorkspaceError(f"JSON root must be an object in: {path}")
-    return payload
+    _local_workspace_store().save_privacy_summary_report(
+        workspace_path=workspace_path,
+        report_payload=report_payload,
+    )
 
 
 def _validate_mapping_payload(payload: dict[str, Any], *, source: Path) -> None:
