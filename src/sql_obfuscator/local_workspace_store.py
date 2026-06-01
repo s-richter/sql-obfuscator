@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,47 @@ from .workspace import (
     _validate_redaction_payload,
     build_default_llm_instructions,
 )
+
+
+WORKSPACE_ARTIFACT_PATHS = (
+    "original.sql",
+    "obfuscated.sql",
+    "llm_instructions.md",
+    "deobfuscated.sql",
+    "reports/deobfuscation_report.json",
+    "reports/roundtrip_report.json",
+    "reports/coverage_report.txt",
+    "reports/llm_workflow_report.json",
+    "reports/llm_edit_application_report.json",
+    "reports/privacy_summary.json",
+    "reports/roundtrip_diff.txt",
+    "reports/original_pretty.sql",
+    "reports/deobfuscated_pretty.sql",
+    "reports/roundtrip_normalized_diff.txt",
+    "translated.sql",
+    "reports/translation_report.json",
+    "redaction.json",
+    "redaction.schema.json",
+)
+
+
+@dataclass(frozen=True)
+class WorkspaceInspection:
+    workspace_path: Path
+    dialect: str | None
+    seed: int | None
+    pretty: bool | None
+    batch_count: int | None
+    statement_count: int | None
+    statement_anchor_count: int
+    mapping_entry_count: int | None
+    mapping_forward_index_size: int
+    mapping_reverse_index_size: int
+    integrity_algorithm: str | None
+    integrity_tracked_file_count: int
+    privacy_llm_safe_blocked: bool | None
+    privacy_review_recommended: bool | None
+    artifacts: dict[str, bool]
 
 
 class LocalWorkspaceStore:
@@ -205,6 +247,48 @@ class LocalWorkspaceStore:
                     f"{target}. Expected {expected_hash}, got {actual_hash}."
                 )
         return payload
+
+    def inspect_workspace(self, workspace_path: Path) -> WorkspaceInspection:
+        if not workspace_path.exists() or not workspace_path.is_dir():
+            raise WorkspaceError(f"Workspace not found or not a directory: {workspace_path}")
+
+        mapping_payload = self.load_mapping_payload(workspace_path / "mapping.json")
+        context_payload = self.load_context_payload(workspace_path / "context.json")
+        integrity_payload = self.validate_workspace_integrity(workspace_path)
+        privacy_summary_path = workspace_path / "reports" / "privacy_summary.json"
+        privacy_summary = (
+            self.load_privacy_summary_report(privacy_summary_path)
+            if privacy_summary_path.exists()
+            else None
+        )
+        return WorkspaceInspection(
+            workspace_path=workspace_path,
+            dialect=context_payload.get("dialect"),
+            seed=context_payload.get("seed"),
+            pretty=context_payload.get("pretty"),
+            batch_count=context_payload.get("batch_count"),
+            statement_count=context_payload.get("statement_count"),
+            statement_anchor_count=len(context_payload.get("statement_anchors", [])),
+            mapping_entry_count=context_payload.get("mapping_entry_count"),
+            mapping_forward_index_size=len(mapping_payload.get("forward_index", {})),
+            mapping_reverse_index_size=len(mapping_payload.get("reverse_index", {})),
+            integrity_algorithm=integrity_payload.get("algorithm"),
+            integrity_tracked_file_count=len(integrity_payload.get("files", {})),
+            privacy_llm_safe_blocked=(
+                privacy_summary.get("llm_safe_blocked")
+                if isinstance(privacy_summary, dict)
+                else None
+            ),
+            privacy_review_recommended=(
+                privacy_summary.get("manual_review_recommended")
+                if isinstance(privacy_summary, dict)
+                else None
+            ),
+            artifacts={
+                rel_path: (workspace_path / Path(rel_path)).exists()
+                for rel_path in WORKSPACE_ARTIFACT_PATHS
+            },
+        )
 
     def save_deobfuscation_artifacts(
         self,

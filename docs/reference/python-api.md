@@ -127,6 +127,23 @@ The functions in `sql_obfuscator.workspace` remain available as compatibility de
 to `LocalWorkspaceStore`. A future web host can provide tenant-scoped persistence without
 changing the host-neutral workflow operations.
 
+## Inspect A Local Workspace
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_workspace_store import LocalWorkspaceStore
+
+inspection = LocalWorkspaceStore().inspect_workspace(Path("script.obf"))
+print(inspection.dialect)
+print(inspection.integrity_algorithm)
+print(inspection.artifacts["reports/privacy_summary.json"])
+```
+
+`inspect_workspace()` validates integrity and returns structured settings, counts, privacy
+flags, and artifact availability. The CLI renders this result as text. A desktop host can
+render an artifact tree, and a web host can expose the same facts on a workspace page.
+
 ## Apply Structured LLM Edits
 
 ```python

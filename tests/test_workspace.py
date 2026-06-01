@@ -77,6 +77,67 @@ def test_local_workspace_store_rejects_integrity_tampering(tmp_path: Path):
         store.load_workspace_snapshot(workspace_path)
 
 
+def test_local_workspace_store_inspects_workspace_artifacts(tmp_path: Path):
+    store = LocalWorkspaceStore()
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+        options=ObfuscationOptions(seed=42),
+    )
+    store.save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+    )
+
+    inspection = store.inspect_workspace(workspace_path)
+
+    assert inspection.workspace_path == workspace_path
+    assert inspection.dialect == "tsql"
+    assert inspection.seed == 42
+    assert inspection.statement_count == 1
+    assert inspection.statement_anchor_count == 1
+    assert inspection.mapping_entry_count > 0
+    assert inspection.integrity_algorithm == "sha256"
+    assert inspection.integrity_tracked_file_count == 4
+    assert inspection.privacy_llm_safe_blocked is False
+    assert inspection.artifacts["original.sql"] is True
+    assert inspection.artifacts["reports/privacy_summary.json"] is True
+    assert inspection.artifacts["translated.sql"] is False
+
+
+def test_local_workspace_store_inspect_rejects_missing_workspace(tmp_path: Path):
+    with pytest.raises(WorkspaceError, match="Workspace not found"):
+        LocalWorkspaceStore().inspect_workspace(tmp_path / "missing.obf")
+
+
+def test_local_workspace_store_inspect_rejects_integrity_tampering(tmp_path: Path):
+    store = LocalWorkspaceStore()
+    input_path = tmp_path / "sample.sql"
+    workspace_path = tmp_path / "sample.obf"
+    prepared = prepare_workspace(
+        "SELECT UserId FROM Users;",
+        input_name=input_path.name,
+    )
+    store.save_workspace_snapshot(
+        workspace_path=workspace_path,
+        input_path=input_path,
+        original_sql=prepared.original_sql,
+        snapshot=prepared.snapshot,
+    )
+    mapping_path = workspace_path / "mapping.json"
+    mapping_path.write_text(
+        mapping_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError, match="Integrity check failed"):
+        store.inspect_workspace(workspace_path)
+
+
 def test_save_and_load_workspace_snapshot_preserves_prepared_workspace(tmp_path: Path):
     input_path = tmp_path / "sample.sql"
     workspace_path = tmp_path / "sample.obf"

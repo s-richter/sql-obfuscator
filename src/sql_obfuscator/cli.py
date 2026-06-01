@@ -10,6 +10,7 @@ from pathlib import Path
 from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
+from .local_workspace_store import LocalWorkspaceStore, WorkspaceInspection
 from .workflow import (
     DeobfuscationResult,
     DeobfuscationSafetyError,
@@ -27,9 +28,6 @@ from .workflow import (
 )
 from .workspace import (
     default_workspace_path,
-    load_context_payload,
-    load_mapping_payload,
-    load_privacy_summary_report,
     load_workspace_snapshot,
     save_deobfuscation_artifacts,
     save_llm_edit_application_report,
@@ -37,7 +35,6 @@ from .workspace import (
     save_roundtrip_reports,
     save_translation_artifacts,
     save_workspace_snapshot,
-    validate_workspace_integrity,
 )
 
 
@@ -757,76 +754,38 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
 
 def _run_workspace_info_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
-    if not workspace_path.exists() or not workspace_path.is_dir():
-        raise WorkspaceError(f"Workspace not found or not a directory: {workspace_path}")
-
-    mapping_path = workspace_path / "mapping.json"
-    context_path = workspace_path / "context.json"
-    original_path = workspace_path / "original.sql"
-    obfuscated_path = workspace_path / "obfuscated.sql"
-    instructions_path = workspace_path / "llm_instructions.md"
-    deobfuscated_path = workspace_path / "deobfuscated.sql"
-    reports_path = workspace_path / "reports"
-    deobf_report_path = reports_path / "deobfuscation_report.json"
-    roundtrip_report_path = reports_path / "roundtrip_report.json"
-    coverage_report_path = reports_path / "coverage_report.txt"
-    llm_workflow_report_path = reports_path / "llm_workflow_report.json"
-    llm_edit_application_report_path = reports_path / "llm_edit_application_report.json"
-    privacy_summary_path = reports_path / "privacy_summary.json"
-    roundtrip_diff_path = reports_path / "roundtrip_diff.txt"
-    original_pretty_path = reports_path / "original_pretty.sql"
-    deobfuscated_pretty_path = reports_path / "deobfuscated_pretty.sql"
-    roundtrip_normalized_diff_path = reports_path / "roundtrip_normalized_diff.txt"
-    translated_path = workspace_path / "translated.sql"
-    translation_report_path = reports_path / "translation_report.json"
-    redaction_path = workspace_path / "redaction.json"
-    redaction_schema_path = workspace_path / "redaction.schema.json"
-
-    mapping_payload = load_mapping_payload(mapping_path)
-    context_payload = load_context_payload(context_path)
-    integrity_payload = validate_workspace_integrity(workspace_path)
-    privacy_summary = (
-        load_privacy_summary_report(privacy_summary_path)
-        if privacy_summary_path.exists()
-        else None
-    )
-
-    lines = [
-        f"workspace: {workspace_path}",
-        f"dialect: {context_payload.get('dialect')}",
-        f"seed: {context_payload.get('seed')}",
-        f"pretty: {context_payload.get('pretty')}",
-        f"batches: {context_payload.get('batch_count')}",
-        f"statements: {context_payload.get('statement_count')}",
-        f"statement anchors: {len(context_payload.get('statement_anchors', []))}",
-        f"mapping entries: {context_payload.get('mapping_entry_count')}",
-        f"mapping forward index size: {len(mapping_payload.get('forward_index', {}))}",
-        f"mapping reverse index size: {len(mapping_payload.get('reverse_index', {}))}",
-        f"integrity algorithm: {integrity_payload.get('algorithm')}",
-        f"integrity tracked files: {len(integrity_payload.get('files', {}))}",
-        f"original.sql: {'yes' if original_path.exists() else 'no'}",
-        f"obfuscated.sql: {'yes' if obfuscated_path.exists() else 'no'}",
-        f"llm_instructions.md: {'yes' if instructions_path.exists() else 'no'}",
-        f"deobfuscated.sql: {'yes' if deobfuscated_path.exists() else 'no'}",
-        f"reports/deobfuscation_report.json: {'yes' if deobf_report_path.exists() else 'no'}",
-        f"reports/roundtrip_report.json: {'yes' if roundtrip_report_path.exists() else 'no'}",
-        f"reports/coverage_report.txt: {'yes' if coverage_report_path.exists() else 'no'}",
-        f"reports/llm_workflow_report.json: {'yes' if llm_workflow_report_path.exists() else 'no'}",
-        f"reports/llm_edit_application_report.json: {'yes' if llm_edit_application_report_path.exists() else 'no'}",
-        f"reports/privacy_summary.json: {'yes' if privacy_summary_path.exists() else 'no'}",
-        f"privacy llm-safe blocked: {privacy_summary.get('llm_safe_blocked') if isinstance(privacy_summary, dict) else 'n/a'}",
-        f"privacy review recommended: {privacy_summary.get('manual_review_recommended') if isinstance(privacy_summary, dict) else 'n/a'}",
-        f"reports/roundtrip_diff.txt: {'yes' if roundtrip_diff_path.exists() else 'no'}",
-        f"reports/original_pretty.sql: {'yes' if original_pretty_path.exists() else 'no'}",
-        f"reports/deobfuscated_pretty.sql: {'yes' if deobfuscated_pretty_path.exists() else 'no'}",
-        f"reports/roundtrip_normalized_diff.txt: {'yes' if roundtrip_normalized_diff_path.exists() else 'no'}",
-        f"translated.sql: {'yes' if translated_path.exists() else 'no'}",
-        f"reports/translation_report.json: {'yes' if translation_report_path.exists() else 'no'}",
-        f"redaction.json: {'yes' if redaction_path.exists() else 'no'}",
-        f"redaction.schema.json: {'yes' if redaction_schema_path.exists() else 'no'}",
-    ]
-    print("\n".join(lines))
+    inspection = LocalWorkspaceStore().inspect_workspace(workspace_path)
+    print(_format_workspace_inspection(inspection))
     return 0
+
+
+def _format_workspace_inspection(inspection: WorkspaceInspection) -> str:
+    lines = [
+        f"workspace: {inspection.workspace_path}",
+        f"dialect: {inspection.dialect}",
+        f"seed: {inspection.seed}",
+        f"pretty: {inspection.pretty}",
+        f"batches: {inspection.batch_count}",
+        f"statements: {inspection.statement_count}",
+        f"statement anchors: {inspection.statement_anchor_count}",
+        f"mapping entries: {inspection.mapping_entry_count}",
+        f"mapping forward index size: {inspection.mapping_forward_index_size}",
+        f"mapping reverse index size: {inspection.mapping_reverse_index_size}",
+        f"integrity algorithm: {inspection.integrity_algorithm}",
+        f"integrity tracked files: {inspection.integrity_tracked_file_count}",
+    ]
+    for rel_path, available in inspection.artifacts.items():
+        lines.append(f"{rel_path}: {'yes' if available else 'no'}")
+        if rel_path == "reports/privacy_summary.json":
+            lines.append(
+                "privacy llm-safe blocked: "
+                f"{inspection.privacy_llm_safe_blocked if inspection.privacy_llm_safe_blocked is not None else 'n/a'}"
+            )
+            lines.append(
+                "privacy review recommended: "
+                f"{inspection.privacy_review_recommended if inspection.privacy_review_recommended is not None else 'n/a'}"
+            )
+    return "\n".join(lines)
 
 
 def _run_translate_command(args: argparse.Namespace) -> int:
