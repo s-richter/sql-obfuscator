@@ -14,22 +14,23 @@ def _subparser_help(command: str) -> str:
     return command_parser.format_help()
 
 
-def test_readme_mentions_key_cli_flags():
-    readme_path = Path(__file__).resolve().parents[1] / "README.md"
-    readme_text = readme_path.read_text(encoding="utf-8")
+def test_cli_reference_mentions_key_cli_flags():
+    root = Path(__file__).resolve().parents[1]
+    readme_text = (root / "README.md").read_text(encoding="utf-8")
+    reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
 
     for expected in (
         "`--strict-go`",
         "`--stdout-only`",
         "`--output-dir <dir>`",
-        "## Current Limits",
     ):
-        assert expected in readme_text
+        assert expected in reference_text
+    assert "## Current Limits" in readme_text
 
 
-def test_readme_and_cli_help_match_recent_flags():
-    readme_path = Path(__file__).resolve().parents[1] / "README.md"
-    readme_text = readme_path.read_text(encoding="utf-8")
+def test_cli_reference_and_cli_help_match_recent_flags():
+    root = Path(__file__).resolve().parents[1]
+    reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
 
     checks = {
         "obfuscate": ("--strict-go", "--stdout-only", "--output-dir"),
@@ -40,15 +41,12 @@ def test_readme_and_cli_help_match_recent_flags():
         help_text = _subparser_help(command)
         for flag in flags:
             assert flag in help_text
-            assert flag in readme_text
+            assert flag in reference_text
 
 
 def test_docs_describe_translate_stdout_only_semantics():
     root = Path(__file__).resolve().parents[1]
-    readme_text = (root / "README.md").read_text(encoding="utf-8")
-    tutorial_text = (root / "docs" / "COMMAND_TUTORIAL.md").read_text(encoding="utf-8")
+    reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
 
-    assert "including workspace `translated.sql`" in readme_text
-    assert "after the summary line" in readme_text
-    assert "including workspace `translated.sql`" in tutorial_text
-    assert "after the summary line" in tutorial_text
+    assert "`--stdout-only` | Print summary and SQL; write no translated SQL file." in reference_text
+    assert "the workspace also stores `translated.sql`" in reference_text
