@@ -1,3 +1,11 @@
+"""Workspace schemas, payload validation, and compatibility persistence exports.
+
+Local filesystem persistence lives in :mod:`sql_obfuscator.local_workspace_store`.
+The persistence functions exported here remain as compatibility delegators for
+existing callers; new local persistence behavior should be added to
+``LocalWorkspaceStore`` or ``LocalWorkspaceApplication``.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -135,6 +143,26 @@ INTEGRITY_TRACKED_FILES = [
     "mapping.json",
     "context.json",
 ]
+
+COMPATIBILITY_PERSISTENCE_EXPORTS = (
+    "default_workspace_path",
+    "save_workspace_snapshot",
+    "load_workspace_snapshot",
+    "save_workspace_artifacts",
+    "load_mapping_payload",
+    "load_context_payload",
+    "load_redaction_payload",
+    "load_llm_workflow_report",
+    "load_privacy_summary_report",
+    "validate_workspace_integrity",
+    "save_deobfuscation_artifacts",
+    "save_roundtrip_reports",
+    "save_translation_artifacts",
+    "save_llm_workflow_report",
+    "save_llm_workflow_report_if_present",
+    "save_llm_edit_application_report",
+    "save_privacy_summary_report",
+)
 
 
 @dataclass(frozen=True)

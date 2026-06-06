@@ -75,3 +75,15 @@ def test_docs_index_links_to_storage_seam_decision():
 
     assert "ADR 0001" in docs_index
     assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
+
+
+def test_python_api_docs_direct_new_persistence_to_local_store_or_application():
+    root = Path(__file__).resolve().parents[1]
+    reference_text = (root / "docs" / "reference" / "python-api.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "`sql_obfuscator.workspace` remain available as compatibility delegators" in reference_text
+    assert "New local persistence behavior should use" in reference_text
+    assert "`LocalWorkspaceStore` or `LocalWorkspaceApplication`" in reference_text
+    assert "not expand the compatibility surface" in reference_text

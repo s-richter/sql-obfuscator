@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import sql_obfuscator.workspace as workspace_module
 from sql_obfuscator.errors import WorkspaceError
 from sql_obfuscator.local_workspace_store import LocalWorkspaceStore
 from sql_obfuscator.workflow import ObfuscationOptions, prepare_workspace
@@ -23,6 +24,31 @@ from sql_obfuscator.workspace import (
     save_workspace_artifacts,
     save_translation_artifacts,
 )
+
+
+def test_workspace_persistence_exports_are_compatibility_delegators():
+    assert "compatibility delegators" in (workspace_module.__doc__ or "")
+    assert set(workspace_module.COMPATIBILITY_PERSISTENCE_EXPORTS) == {
+        "default_workspace_path",
+        "save_workspace_snapshot",
+        "load_workspace_snapshot",
+        "save_workspace_artifacts",
+        "load_mapping_payload",
+        "load_context_payload",
+        "load_redaction_payload",
+        "load_llm_workflow_report",
+        "load_privacy_summary_report",
+        "validate_workspace_integrity",
+        "save_deobfuscation_artifacts",
+        "save_roundtrip_reports",
+        "save_translation_artifacts",
+        "save_llm_workflow_report",
+        "save_llm_workflow_report_if_present",
+        "save_llm_edit_application_report",
+        "save_privacy_summary_report",
+    }
+    for name in workspace_module.COMPATIBILITY_PERSISTENCE_EXPORTS:
+        assert callable(getattr(workspace_module, name))
 
 
 def test_default_workspace_path_uses_stem(tmp_path: Path):

@@ -178,8 +178,10 @@ snapshot = store.load_workspace_snapshot(Path("script.obf"))
 ```
 
 The functions in `sql_obfuscator.workspace` remain available as compatibility delegators
-to `LocalWorkspaceStore`. A future web host can provide tenant-scoped persistence without
-changing the host-neutral workflow operations.
+to `LocalWorkspaceStore`. New local persistence behavior should use
+`LocalWorkspaceStore` or `LocalWorkspaceApplication`, not expand the compatibility surface.
+A future web host can provide tenant-scoped persistence without changing the host-neutral
+workflow operations.
 
 ## Inspect A Local Workspace
 
