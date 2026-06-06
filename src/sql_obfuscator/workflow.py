@@ -9,8 +9,10 @@ from sqlglot.errors import ParseError
 from .deobfuscation import deobfuscate_sql_with_report
 from .diagnostics import (
     WorkflowDiagnostic,
+    capture_sqlglot_warnings,
     deobfuscation_diagnostics,
     privacy_diagnostics,
+    sqlglot_warning_diagnostics,
     translation_diagnostics,
 )
 from .dialects_factory import get_dialect_profile
@@ -61,12 +63,22 @@ class PreparedWorkspace:
     instructions_text: str
     snapshot: WorkspaceSnapshot
     safety: LlmSafetyDecision
+    diagnostics: tuple[WorkflowDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class StatementReplacementSummary:
+    applied_edit_count: int
+    untouched_statement_count: int
+    statement_count: int
+    targeted_statement_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class StatementReplacementResult:
     applied_obfuscated_sql: str
     report: dict[str, Any]
+    summary: StatementReplacementSummary
 
 
 @dataclass(frozen=True)
@@ -134,6 +146,7 @@ class RoundtripResult:
     normalized_exact_match: bool
     report: dict[str, Any]
     artifacts: RoundtripArtifacts
+    diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -187,19 +200,20 @@ def prepare_workspace(
 ) -> PreparedWorkspace:
     sensitive_columns = _normalized_sensitive_columns(options.sensitive_columns)
     _validate_obfuscation_options(options, sensitive_columns=sensitive_columns)
-    obfuscation = obfuscate_sql_with_metadata(
-        sql,
-        dialect=options.dialect,
-        seed=options.seed,
-        strict_go=options.strict_go,
-        pretty=options.pretty,
-        redact_literals=options.redact_literals,
-        strip_comments=options.strip_comments,
-        redaction_mode=options.redaction_mode,
-        redaction_policy=options.redaction_policy,
-        sensitive_columns=sensitive_columns,
-        identifier_vocabulary=options.identifier_vocabulary,
-    )
+    with capture_sqlglot_warnings() as sqlglot_warnings:
+        obfuscation = obfuscate_sql_with_metadata(
+            sql,
+            dialect=options.dialect,
+            seed=options.seed,
+            strict_go=options.strict_go,
+            pretty=options.pretty,
+            redact_literals=options.redact_literals,
+            strip_comments=options.strip_comments,
+            redaction_mode=options.redaction_mode,
+            redaction_policy=options.redaction_policy,
+            sensitive_columns=sensitive_columns,
+            identifier_vocabulary=options.identifier_vocabulary,
+        )
     privacy_summary = obfuscation.privacy_summary or {}
     blockers = tuple(
         item for item in privacy_summary.get("blockers", []) if isinstance(item, str)
@@ -207,11 +221,16 @@ def prepare_workspace(
     warnings = tuple(
         item for item in privacy_summary.get("warnings", []) if isinstance(item, str)
     )
+    safety_diagnostics = privacy_diagnostics(privacy_summary)
+    diagnostics = (
+        *safety_diagnostics,
+        *sqlglot_warning_diagnostics(sqlglot_warnings),
+    )
     safety = LlmSafetyDecision(
         approved=not blockers,
         blockers=blockers,
         warnings=warnings,
-        diagnostics=privacy_diagnostics(privacy_summary),
+        diagnostics=safety_diagnostics,
     )
     obfuscation_summary = obfuscation.obfuscation_report or {}
     llm_workflow_report = {
@@ -245,6 +264,7 @@ def prepare_workspace(
         instructions_text=instructions_text,
         snapshot=snapshot,
         safety=safety,
+        diagnostics=diagnostics,
     )
     if options.llm_safe and safety.blockers:
         raise LlmSafetyError(prepared)
@@ -266,6 +286,18 @@ def apply_statement_replacements(
     return StatementReplacementResult(
         applied_obfuscated_sql=applied_obfuscated_sql,
         report=report,
+        summary=_statement_replacement_summary(report),
+    )
+
+
+def _statement_replacement_summary(report: dict[str, Any]) -> StatementReplacementSummary:
+    return StatementReplacementSummary(
+        applied_edit_count=int(report.get("applied_edit_count", 0)),
+        untouched_statement_count=int(report.get("untouched_statement_count", 0)),
+        statement_count=int(report.get("statement_count", 0)),
+        targeted_statement_ids=tuple(
+            item for item in report.get("targeted_statement_ids", ()) if isinstance(item, str)
+        ),
     )
 
 
@@ -273,27 +305,32 @@ def analyze_deobfuscation(
     snapshot: WorkspaceSnapshot,
     edited_sql: str,
 ) -> DeobfuscationResult:
-    deobfuscated_sql, report = deobfuscate_sql_with_report(
-        edited_sql,
-        mapping_payload=snapshot.mapping_payload,
-        context_payload=snapshot.context_payload,
-    )
-    if snapshot.redaction_payload is not None:
-        deobfuscated_sql, redaction_report = restore_reversible_redaction(
-            deobfuscated_sql,
-            dialect=str(snapshot.context_payload.get("dialect", "tsql")),
-            pretty=bool(snapshot.context_payload.get("pretty", True)),
-            redaction_payload=snapshot.redaction_payload,
+    with capture_sqlglot_warnings() as sqlglot_warnings:
+        deobfuscated_sql, report = deobfuscate_sql_with_report(
+            edited_sql,
+            mapping_payload=snapshot.mapping_payload,
+            context_payload=snapshot.context_payload,
         )
-        report["redaction"] = redaction_report
+        if snapshot.redaction_payload is not None:
+            deobfuscated_sql, redaction_report = restore_reversible_redaction(
+                deobfuscated_sql,
+                dialect=str(snapshot.context_payload.get("dialect", "tsql")),
+                pretty=bool(snapshot.context_payload.get("pretty", True)),
+                redaction_payload=snapshot.redaction_payload,
+            )
+            report["redaction"] = redaction_report
     safety = _deobfuscation_safety(report)
     summary = _deobfuscation_summary(report, safety=safety)
+    diagnostics = (
+        *deobfuscation_diagnostics(report),
+        *sqlglot_warning_diagnostics(sqlglot_warnings),
+    )
     return DeobfuscationResult(
         deobfuscated_sql=deobfuscated_sql,
         report=report,
         safety=safety,
         summary=summary,
-        diagnostics=deobfuscation_diagnostics(report),
+        diagnostics=diagnostics,
         llm_workflow_report=_updated_llm_workflow_report(
             snapshot.llm_workflow_report,
             deobfuscation_report=report,
@@ -346,16 +383,17 @@ def verify_roundtrip(
         prepared.snapshot.obfuscated_sql,
     )
     dialect = str(prepared.snapshot.context_payload.get("dialect", "tsql"))
-    try:
-        original_pretty_sql = _normalize_sql_for_comparison(sql, dialect=dialect)
-        deobfuscated_pretty_sql = _normalize_sql_for_comparison(
-            deobfuscation.deobfuscated_sql,
-            dialect=dialect,
-        )
-    except ParseError as exc:
-        raise ParseScriptError(
-            f"Parse error while building normalized roundtrip comparison: {exc}"
-        ) from exc
+    with capture_sqlglot_warnings() as sqlglot_warnings:
+        try:
+            original_pretty_sql = _normalize_sql_for_comparison(sql, dialect=dialect)
+            deobfuscated_pretty_sql = _normalize_sql_for_comparison(
+                deobfuscation.deobfuscated_sql,
+                dialect=dialect,
+            )
+        except ParseError as exc:
+            raise ParseScriptError(
+                f"Parse error while building normalized roundtrip comparison: {exc}"
+            ) from exc
     normalized_diff_lines = list(
         difflib.unified_diff(
             original_pretty_sql.splitlines(keepends=True),
@@ -396,6 +434,11 @@ def verify_roundtrip(
             deobfuscated_pretty_sql=deobfuscated_pretty_sql,
             normalized_diff_text="".join(normalized_diff_lines),
         ),
+        diagnostics=(
+            *prepared.diagnostics,
+            *deobfuscation.diagnostics,
+            *sqlglot_warning_diagnostics(sqlglot_warnings),
+        ),
     )
 
 
@@ -404,13 +447,14 @@ def translate_document(
     *,
     options: TranslationOptions,
 ) -> TranslationWorkflowResult:
-    result = translate_sql_with_report(
-        sql,
-        source_dialect=options.source_dialect,
-        target_dialect=options.target_dialect,
-        pretty=options.pretty,
-        validate=options.validate,
-    )
+    with capture_sqlglot_warnings() as sqlglot_warnings:
+        result = translate_sql_with_report(
+            sql,
+            source_dialect=options.source_dialect,
+            target_dialect=options.target_dialect,
+            pretty=options.pretty,
+            validate=options.validate,
+        )
     return TranslationWorkflowResult(
         translation=result,
         succeeded=(
@@ -424,7 +468,10 @@ def translate_document(
             failed_statement_count=result.failed_statement_count,
             warning_count=len(result.warnings),
         ),
-        diagnostics=translation_diagnostics(result),
+        diagnostics=(
+            *translation_diagnostics(result),
+            *sqlglot_warning_diagnostics(sqlglot_warnings),
+        ),
     )
 
 

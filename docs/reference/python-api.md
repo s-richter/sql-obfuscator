@@ -183,6 +183,38 @@ to `LocalWorkspaceStore`. New local persistence behavior should use
 A future web host can provide tenant-scoped persistence without changing the host-neutral
 workflow operations.
 
+## Run Local Workflow Operations
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_application import LocalWorkspaceApplication
+from sql_obfuscator.workflow import ObfuscationOptions, TranslationOptions
+
+app = LocalWorkspaceApplication()
+prepared = app.prepare_and_save_workspace(
+    sql_text,
+    input_path=Path("script.sql"),
+    options=ObfuscationOptions(seed=42),
+)
+print(prepared.summary.workspace_path)
+print(prepared.summary.written_artifact_paths)
+
+translated = app.translate_and_save_artifacts(
+    sql_text,
+    options=TranslationOptions(source_dialect="tsql", target_dialect="hive"),
+    workspace_path=prepared.summary.workspace_path,
+    persist_translated_sql=True,
+)
+print(translated.summary.translation.target_dialect)
+print(translated.summary.translated_sql_persisted)
+```
+
+Local application methods return workflow results plus a `summary` object with structured
+operation facts such as workspace path, output path, written artifacts, persistence status,
+and typed workflow counts. CLI handlers render those summaries as text; desktop and web
+hosts can render the same facts without reading report dictionaries.
+
 ## Inspect A Local Workspace
 
 ```python
@@ -194,11 +226,16 @@ inspection = LocalWorkspaceStore().inspect_workspace(Path("script.obf"))
 print(inspection.dialect)
 print(inspection.integrity_algorithm)
 print(inspection.artifacts["reports/privacy_summary.json"])
+
+for artifact in inspection.artifact_statuses:
+    print(artifact.relative_path, artifact.kind, artifact.available)
 ```
 
 `inspect_workspace()` validates integrity and returns structured settings, counts, privacy
-flags, and artifact availability. The CLI renders this result as text. A desktop host can
-render an artifact tree, and a web host can expose the same facts on a workspace page.
+flags, and an ordered artifact inventory with media type, availability, read-only status,
+and integrity protection metadata. `inspection.artifacts` remains a path-to-availability
+shortcut for compatibility. The CLI renders this result as text. A desktop host can render
+an artifact tree, and a web host can expose the same facts on a workspace page.
 
 ## Browse Local Workspace Artifacts
 
@@ -278,8 +315,10 @@ for diagnostic in result.diagnostics:
 
 Use these structured diagnostics for a desktop results panel or a web response. Keep the raw
 report payload when a user needs the full audit artifact. Preparation diagnostics are available
-as `prepared.safety.diagnostics`; restoration and translation diagnostics are available directly
-on their workflow results.
+as `prepared.diagnostics`; restoration and translation diagnostics are available directly on
+their workflow results. Parser fallback notices from `sqlglot` use the
+`sqlglot.fallback_parse` diagnostic code, so hosts can render the same warning facts as the
+CLI without capturing terminal logs.
 
 ## Present Application Errors
 

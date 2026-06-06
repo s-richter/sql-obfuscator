@@ -31,8 +31,37 @@ def test_local_application_prepares_and_inspects_workspace_without_printing(
     assert operation.workspace_path == workspace_path
     assert operation.prepared.snapshot.obfuscated_sql
     assert workspace_path / "obfuscated.sql" in operation.written_artifact_paths
+    assert operation.summary.workspace_path == workspace_path
+    assert operation.summary.written_artifact_paths == operation.written_artifact_paths
+    assert operation.summary.llm_safe_approved is True
     assert inspection.seed == 42
     assert inspection.artifacts["obfuscated.sql"] is True
+    artifacts = {artifact.relative_path: artifact for artifact in inspection.artifact_statuses}
+    assert artifacts["obfuscated.sql"].available is True
+    assert artifacts["obfuscated.sql"].media_type == "text/sql"
+    assert artifacts["obfuscated.sql"].read_only is True
+    assert artifacts["obfuscated.sql"].integrity_protected is True
+    assert artifacts["translated.sql"].available is False
+
+
+def test_local_application_exposes_sqlglot_warning_diagnostics_without_printing(
+    tmp_path: Path,
+    capsys,
+):
+    operation = LocalWorkspaceApplication().prepare_and_save_workspace(
+        "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",
+        input_path=tmp_path / "sample.sql",
+        workspace_path=tmp_path / "sample.obf",
+    )
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert any(
+        diagnostic.code == "sqlglot.fallback_parse"
+        for diagnostic in operation.diagnostics
+    )
 
 
 def test_local_application_opens_workspace_as_read_only_artifact_tree(tmp_path: Path):
@@ -49,6 +78,7 @@ def test_local_application_opens_workspace_as_read_only_artifact_tree(tmp_path: 
 
     assert workspace.workspace_path == workspace_path
     assert workspace.inspection.artifacts["obfuscated.sql"] is True
+    assert workspace.artifacts == workspace.inspection.artifact_statuses
     assert artifacts["original.sql"].available is True
     assert artifacts["original.sql"].read_only is True
     assert artifacts["original.sql"].integrity_protected is True
@@ -196,8 +226,16 @@ def test_local_application_applies_and_saves_statement_replacements(tmp_path: Pa
     operation = app.apply_and_save_statement_replacements(workspace_path, edits_payload)
 
     assert dry_run.written_artifact_paths == ()
+    assert dry_run.summary.persisted is False
+    assert dry_run.summary.output_path is None
+    assert dry_run.summary.replacement.applied_edit_count == 1
+    assert dry_run.summary.replacement.statement_count == 1
     assert (workspace_path / "llm_response_obfuscated.sql").exists()
     assert operation.output_path == workspace_path / "llm_response_obfuscated.sql"
+    assert operation.summary.persisted is True
+    assert operation.summary.output_path == operation.output_path
+    assert operation.summary.written_artifact_paths == operation.written_artifact_paths
+    assert operation.summary.replacement.targeted_statement_ids == (anchor["statement_id"],)
     assert workspace_path / "reports" / "llm_edit_application_report.json" in (
         operation.written_artifact_paths
     )
@@ -225,6 +263,10 @@ def test_local_application_validate_before_write_blocks_then_saves(tmp_path: Pat
     )
 
     assert "UserId" in operation.deobfuscation.deobfuscated_sql
+    assert operation.summary.persisted is True
+    assert operation.summary.output_path == workspace_path / "deobfuscated.sql"
+    assert operation.summary.deobfuscation.unknown_count == 0
+    assert operation.summary.has_unresolved is False
     assert workspace_path / "deobfuscated.sql" in operation.written_artifact_paths
     assert workspace_path / "reports" / "deobfuscation_report.json" in (
         operation.written_artifact_paths
@@ -242,6 +284,10 @@ def test_local_application_verifies_and_saves_roundtrip_reports(tmp_path: Path):
     )
 
     assert operation.roundtrip is not None
+    assert operation.summary.completed is True
+    assert operation.summary.exact_match is not None
+    assert operation.summary.deobfuscation is not None
+    assert operation.summary.written_artifact_paths == operation.written_artifact_paths
     assert workspace_path / "reports" / "roundtrip_report.json" in (
         operation.written_artifact_paths
     )
@@ -266,6 +312,10 @@ def test_local_application_saves_translation_report_and_optional_sql(tmp_path: P
     assert workspace_path / "reports" / "translation_report.json" in (
         report_only.written_artifact_paths
     )
+    assert report_only.summary.workspace_path == workspace_path
+    assert report_only.summary.translation_report_persisted is True
+    assert report_only.summary.translated_sql_persisted is False
+    assert report_only.summary.translation.target_dialect == "hive"
     assert (workspace_path / "translated.sql").exists() is False
 
     persisted = app.translate_and_save_artifacts(
@@ -275,3 +325,5 @@ def test_local_application_saves_translation_report_and_optional_sql(tmp_path: P
         persist_translated_sql=True,
     )
     assert workspace_path / "translated.sql" in persisted.written_artifact_paths
+    assert persisted.summary.translated_sql_persisted is True
+    assert persisted.summary.written_artifact_paths == persisted.written_artifact_paths

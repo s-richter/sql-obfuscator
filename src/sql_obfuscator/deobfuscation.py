@@ -10,6 +10,11 @@ from sqlglot.expressions import Expression
 from .dialects_base import DialectProfile
 from .dialects_factory import get_dialect_profile
 from .errors import ParseScriptError, WorkspaceError
+from .identifier_occurrences import (
+    column_identifier_occurrences,
+    node_context,
+    table_identifier_occurrence,
+)
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
 from .statement_anchors import build_statement_anchor_matches, match_to_payload
 
@@ -240,30 +245,6 @@ class _ReverseResolver:
         return top[0]
 
 
-def _is_update_alias_target(table: exp.Table) -> bool:
-    if not isinstance(table.parent, exp.Update) or table.arg_key != "this":
-        return False
-    table_name = table.this
-    if not isinstance(table_name, exp.Identifier):
-        return False
-    alias_names = {
-        alias.this.name
-        for alias in table.parent.find_all(exp.TableAlias)
-        if isinstance(alias.this, exp.Identifier)
-    }
-    return table_name.name in alias_names
-
-
-def _is_set_option_column(column: exp.Column) -> bool:
-    parent = column.parent
-    if not isinstance(parent, exp.EQ):
-        return False
-    set_item = parent.parent
-    if not isinstance(set_item, exp.SetItem):
-        return False
-    return isinstance(set_item.parent, exp.Set)
-
-
 def _set_identifier(
     identifier: exp.Identifier,
     original: _ReverseEntry,
@@ -379,73 +360,6 @@ def _record_low_confidence(
     )
 
 
-def _resolution_context(
-    node: Expression,
-    *,
-    batch_index: int,
-    statement_index: int,
-) -> dict[str, str | int]:
-    parent_kind = type(node.parent).__name__.lower() if isinstance(node.parent, Expression) else ""
-    node_kind = type(node).__name__.lower()
-    arg_key = node.arg_key or ""
-    clause_kind = _clause_kind(node)
-    statement_kind = _statement_kind(node)
-    return {
-        "batch_index": batch_index,
-        "statement_index": statement_index,
-        "scope_id": f"b{batch_index}.s{statement_index}.{node_kind}.{arg_key}",
-        "parent_kind": parent_kind,
-        "statement_kind": statement_kind,
-        "clause_kind": clause_kind,
-        "node_kind": node_kind,
-        "arg_key": arg_key,
-    }
-
-
-def _clause_kind(node: Expression) -> str:
-    parent = node.parent
-    while isinstance(parent, Expression):
-        if isinstance(
-            parent,
-            (
-                exp.Select,
-                exp.From,
-                exp.Where,
-                exp.Join,
-                exp.Group,
-                exp.Order,
-                exp.Having,
-                exp.Qualify,
-                exp.Insert,
-                exp.Update,
-                exp.Delete,
-                exp.Create,
-            ),
-        ):
-            return type(parent).__name__.lower()
-        parent = parent.parent
-    return ""
-
-
-def _statement_kind(node: Expression) -> str:
-    parent: Expression | None = node
-    while isinstance(parent, Expression):
-        if isinstance(
-            parent,
-            (
-                exp.Select,
-                exp.Insert,
-                exp.Update,
-                exp.Delete,
-                exp.Create,
-                exp.Merge,
-            ),
-        ):
-            return type(parent).__name__.lower()
-        parent = parent.parent
-    return ""
-
-
 def _resolve_and_apply(
     resolver: _ReverseResolver,
     *,
@@ -463,11 +377,11 @@ def _resolve_and_apply(
     profile: DialectProfile,
     fallback_kinds: tuple[str, ...] = (),
 ) -> _ReverseEntry | None:
-    context = _resolution_context(
+    context = node_context(
         node,
         batch_index=resolution_batch_index,
         statement_index=resolution_statement_index,
-    )
+    ).as_registry_kwargs()
     kinds_to_try = (kind, *fallback_kinds)
     resolved: _ResolutionOutcome | None = None
     resolved_kind = kind
@@ -627,18 +541,22 @@ def _transform_statement(
 
     def _transform(node: Expression) -> Expression:
         if isinstance(node, exp.Table):
-            identifier = node.this
-            if not isinstance(identifier, exp.Identifier):
+            occurrence = table_identifier_occurrence(
+                node,
+                profile=profile,
+                batch_index=resolution_batch_index,
+                statement_index=resolution_statement_index,
+            )
+            if occurrence is None:
                 return node
-            kind = "alias" if _is_update_alias_target(node) else "table"
             _resolve_and_apply(
                 resolver,
                 report=report,
                 node=node,
-                identifier=identifier,
-                obfuscated_lexeme=profile.table_identifier_raw(identifier),
-                kind=kind,
-                role="update_target_alias" if kind == "alias" else "table_reference",
+                identifier=occurrence.identifier,
+                obfuscated_lexeme=occurrence.lexeme,
+                kind=occurrence.kind,
+                role=occurrence.role,
                 current_batch_index=current_batch_index,
                 current_statement_index=current_statement_index,
                 resolution_batch_index=resolution_batch_index,
@@ -649,35 +567,20 @@ def _transform_statement(
             return node
 
         if isinstance(node, exp.Column):
-            if _is_set_option_column(node):
-                return node
-            column_id = node.this
-            if isinstance(column_id, exp.Identifier):
+            for occurrence in column_identifier_occurrences(
+                node,
+                profile=profile,
+                batch_index=resolution_batch_index,
+                statement_index=resolution_statement_index,
+            ):
                 _resolve_and_apply(
                     resolver,
                     report=report,
                     node=node,
-                    identifier=column_id,
-                    obfuscated_lexeme=column_id.name,
-                    kind="column",
-                    role="column_reference",
-                    current_batch_index=current_batch_index,
-                    current_statement_index=current_statement_index,
-                    resolution_batch_index=resolution_batch_index,
-                    resolution_statement_index=resolution_statement_index,
-                    statement_anchor=statement_anchor,
-                    profile=profile,
-                )
-            qualifier = node.args.get("table")
-            if isinstance(qualifier, exp.Identifier):
-                _resolve_and_apply(
-                    resolver,
-                    report=report,
-                    node=node,
-                    identifier=qualifier,
-                    obfuscated_lexeme=qualifier.name,
-                    kind="alias",
-                    role="column_qualifier",
+                    identifier=occurrence.identifier,
+                    obfuscated_lexeme=occurrence.identifier.name,
+                    kind=occurrence.kind,
+                    role=occurrence.role,
                     current_batch_index=current_batch_index,
                     current_statement_index=current_statement_index,
                     resolution_batch_index=resolution_batch_index,

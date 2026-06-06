@@ -30,28 +30,6 @@ from .workspace import (
 )
 
 
-WORKSPACE_ARTIFACT_PATHS = (
-    "original.sql",
-    "obfuscated.sql",
-    "llm_instructions.md",
-    "deobfuscated.sql",
-    "reports/deobfuscation_report.json",
-    "reports/roundtrip_report.json",
-    "reports/coverage_report.txt",
-    "reports/llm_workflow_report.json",
-    "reports/llm_edit_application_report.json",
-    "reports/privacy_summary.json",
-    "reports/roundtrip_diff.txt",
-    "reports/original_pretty.sql",
-    "reports/deobfuscated_pretty.sql",
-    "reports/roundtrip_normalized_diff.txt",
-    "translated.sql",
-    "reports/translation_report.json",
-    "redaction.json",
-    "redaction.schema.json",
-)
-
-
 @dataclass(frozen=True)
 class WorkspaceArtifactDefinition:
     relative_path: str
@@ -170,6 +148,7 @@ class WorkspaceInspection:
     privacy_llm_safe_blocked: bool | None
     privacy_review_recommended: bool | None
     artifacts: dict[str, bool]
+    artifact_statuses: tuple[WorkspaceArtifact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -388,22 +367,10 @@ class LocalWorkspaceStore:
 
     def open_workspace(self, workspace_path: Path) -> LocalWorkspaceView:
         inspection = self.inspect_workspace(workspace_path)
-        integrity_payload = self._read_json(workspace_path / "integrity.json")
-        protected_paths = set(integrity_payload.get("files", {}))
         return LocalWorkspaceView(
             workspace_path=workspace_path,
             inspection=inspection,
-            artifacts=tuple(
-                WorkspaceArtifact(
-                    relative_path=definition.relative_path,
-                    kind=definition.kind,
-                    media_type=definition.media_type,
-                    available=(workspace_path / definition.relative_path).exists(),
-                    read_only=definition.read_only,
-                    integrity_protected=definition.relative_path in protected_paths,
-                )
-                for definition in WORKSPACE_ARTIFACT_CATALOG
-            ),
+            artifacts=inspection.artifact_statuses,
         )
 
     def load_workspace_artifact(
@@ -446,6 +413,10 @@ class LocalWorkspaceStore:
             if privacy_summary_path.exists()
             else None
         )
+        artifact_statuses = self._build_workspace_artifacts(
+            workspace_path,
+            protected_paths=set(integrity_payload.get("files", {})),
+        )
         return WorkspaceInspection(
             workspace_path=workspace_path,
             dialect=context_payload.get("dialect"),
@@ -470,9 +441,28 @@ class LocalWorkspaceStore:
                 else None
             ),
             artifacts={
-                rel_path: (workspace_path / Path(rel_path)).exists()
-                for rel_path in WORKSPACE_ARTIFACT_PATHS
+                artifact.relative_path: artifact.available
+                for artifact in artifact_statuses
             },
+            artifact_statuses=artifact_statuses,
+        )
+
+    def _build_workspace_artifacts(
+        self,
+        workspace_path: Path,
+        *,
+        protected_paths: set[str],
+    ) -> tuple[WorkspaceArtifact, ...]:
+        return tuple(
+            WorkspaceArtifact(
+                relative_path=definition.relative_path,
+                kind=definition.kind,
+                media_type=definition.media_type,
+                available=(workspace_path / definition.relative_path).exists(),
+                read_only=definition.read_only,
+                integrity_protected=definition.relative_path in protected_paths,
+            )
+            for definition in WORKSPACE_ARTIFACT_CATALOG
         )
 
     def _normalize_workspace_artifact_path(self, relative_path: str | Path) -> str:
