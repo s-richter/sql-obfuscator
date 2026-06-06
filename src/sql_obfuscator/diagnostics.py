@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import zip_longest
@@ -19,31 +21,42 @@ class WorkflowDiagnostic:
     statement_index: int | None = None
 
 
-class _SqlglotWarningCapture(logging.Handler):
+_sqlglot_warning_buffers: ContextVar[tuple[list[str], ...]] = ContextVar(
+    "sqlglot_warning_buffers",
+    default=(),
+)
+_sqlglot_warning_handler: logging.Handler | None = None
+_sqlglot_warning_handler_lock = threading.Lock()
+
+
+class _SqlglotWarningRouter(logging.Handler):
     def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
-        self.messages: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(record.getMessage())
+        for messages in _sqlglot_warning_buffers.get():
+            messages.append(record.getMessage())
+
+
+def _ensure_sqlglot_warning_handler(logger: logging.Logger) -> None:
+    global _sqlglot_warning_handler
+    with _sqlglot_warning_handler_lock:
+        if _sqlglot_warning_handler is None:
+            _sqlglot_warning_handler = _SqlglotWarningRouter()
+        if _sqlglot_warning_handler not in logger.handlers:
+            logger.addHandler(_sqlglot_warning_handler)
 
 
 @contextmanager
 def capture_sqlglot_warnings():
     logger = logging.getLogger("sqlglot")
-    handler = _SqlglotWarningCapture()
-    previous_handlers = list(logger.handlers)
-    previous_level = logger.level
-    previous_propagate = logger.propagate
-    logger.handlers = [handler]
-    logger.setLevel(logging.WARNING)
-    logger.propagate = False
+    _ensure_sqlglot_warning_handler(logger)
+    messages: list[str] = []
+    token = _sqlglot_warning_buffers.set((*_sqlglot_warning_buffers.get(), messages))
     try:
-        yield handler.messages
+        yield messages
     finally:
-        logger.handlers = previous_handlers
-        logger.setLevel(previous_level)
-        logger.propagate = previous_propagate
+        _sqlglot_warning_buffers.reset(token)
 
 
 def sqlglot_warning_diagnostics(messages: Iterable[str]) -> tuple[WorkflowDiagnostic, ...]:
