@@ -77,6 +77,28 @@ def test_docs_index_links_to_storage_seam_decision():
     assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
 
 
+def test_website_hosting_guardrails_are_recorded_as_durable_architecture_doc():
+    root = Path(__file__).resolve().parents[1]
+    guardrails_text = (
+        root
+        / "docs"
+        / "maintainers"
+        / "architecture"
+        / "website-hosting-guardrails-2026-06-06.md"
+    ).read_text(encoding="utf-8")
+    docs_index = (root / "docs" / "README.md").read_text(encoding="utf-8")
+
+    assert "tenant_id" in guardrails_text
+    assert "workspace_id" in guardrails_text
+    assert "opaque server-generated workspace IDs" in guardrails_text
+    assert "Callers must never\nprovide filesystem paths" in guardrails_text
+    assert "fail closed by default" in guardrails_text
+    assert "maximum SQL input bytes" in guardrails_text
+    assert "per-workspace mutation lock" in guardrails_text
+    assert "Website hosting guardrails" in docs_index
+    assert "website-hosting-guardrails-2026-06-06.md" in docs_index
+
+
 def test_python_api_docs_direct_new_persistence_to_local_store_or_application():
     root = Path(__file__).resolve().parents[1]
     reference_text = (root / "docs" / "reference" / "python-api.md").read_text(
