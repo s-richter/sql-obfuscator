@@ -50,3 +50,28 @@ def test_docs_describe_translate_stdout_only_semantics():
 
     assert "`--stdout-only` | Print summary and SQL; write no translated SQL file." in reference_text
     assert "the workspace also stores `translated.sql`" in reference_text
+
+
+def test_storage_seam_decision_is_recorded_as_durable_architecture_doc():
+    root = Path(__file__).resolve().parents[1]
+    adr_text = (
+        root / "docs" / "adr" / "0001-local-workspace-store-storage-seam.md"
+    ).read_text(encoding="utf-8")
+
+    assert "LocalWorkspaceStore" in adr_text
+    assert "WorkspaceStore protocol" in adr_text
+    assert "defer" in adr_text.lower()
+    for trigger in (
+        "web tenant storage",
+        "desktop project storage",
+        "non-local adapter",
+    ):
+        assert trigger in adr_text
+
+
+def test_docs_index_links_to_storage_seam_decision():
+    root = Path(__file__).resolve().parents[1]
+    docs_index = (root / "docs" / "README.md").read_text(encoding="utf-8")
+
+    assert "ADR 0001" in docs_index
+    assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
