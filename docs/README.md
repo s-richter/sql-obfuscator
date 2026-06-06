@@ -21,6 +21,7 @@ history without interrupting normal usage documentation.
 
 - [ADR 0001: Keep LocalWorkspaceStore as the Current Storage Seam](adr/0001-local-workspace-store-storage-seam.md)
 - [LLM workflow architecture recommendations](maintainers/architecture/llm-workflow-recommendations-2026-03-22.md)
+- [Website hosting guardrails](maintainers/architecture/website-hosting-guardrails-2026-06-06.md)
 - [GUI implementation plan](maintainers/plans/gui-implementation-plan-2026-03-01.md)
 - [Loose TODO notes](maintainers/TODOs.md)
 - [Code review from 2026-03-01](maintainers/audits/code-review-2026-03-01.md)
