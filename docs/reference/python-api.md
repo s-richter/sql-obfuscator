@@ -278,8 +278,10 @@ for diagnostic in result.diagnostics:
 
 Use these structured diagnostics for a desktop results panel or a web response. Keep the raw
 report payload when a user needs the full audit artifact. Preparation diagnostics are available
-as `prepared.safety.diagnostics`; restoration and translation diagnostics are available directly
-on their workflow results.
+as `prepared.diagnostics`; restoration and translation diagnostics are available directly on
+their workflow results. Parser fallback notices from `sqlglot` use the
+`sqlglot.fallback_parse` diagnostic code, so hosts can render the same warning facts as the
+CLI without capturing terminal logs.
 
 ## Present Application Errors
 

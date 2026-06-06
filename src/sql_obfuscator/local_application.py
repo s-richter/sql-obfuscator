@@ -132,7 +132,7 @@ class LocalWorkspaceApplication:
                 resolved_workspace_path,
                 _SNAPSHOT_ARTIFACT_PATHS,
             ),
-            diagnostics=prepared.safety.diagnostics,
+            diagnostics=prepared.diagnostics,
         )
 
     def apply_and_save_statement_replacements(
@@ -261,7 +261,6 @@ class LocalWorkspaceApplication:
         )
         self.store.load_workspace_snapshot(resolved_workspace_path)
         written_paths = list(self._existing_paths(resolved_workspace_path, _SNAPSHOT_ARTIFACT_PATHS))
-        diagnostics = list(prepared.safety.diagnostics)
         if roundtrip is not None:
             deobfuscation = roundtrip.deobfuscation
             self.store.save_deobfuscation_artifacts(
@@ -290,13 +289,12 @@ class LocalWorkspaceApplication:
                         resolved_workspace_path / "reports" / "roundtrip_diff.txt"
                     )
                 )
-            diagnostics.extend(deobfuscation.diagnostics)
         return LocalRoundtrip(
             prepared=prepared,
             roundtrip=roundtrip,
             workspace_path=resolved_workspace_path,
             written_artifact_paths=_deduplicate_paths(written_paths),
-            diagnostics=tuple(diagnostics),
+            diagnostics=roundtrip.diagnostics if roundtrip is not None else prepared.diagnostics,
         )
 
     def translate_and_save_artifacts(

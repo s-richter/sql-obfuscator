@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
-from contextlib import contextmanager
 from pathlib import Path
 
 from .application_errors import present_application_error
+from .diagnostics import WorkflowDiagnostic, summarize_sqlglot_diagnostics
 from .dialects_factory import supported_dialects
 from .errors import InputFileError, ObfuscatorError, ParseScriptError, WorkspaceError
 from .llm_edits import load_llm_edits_payload
@@ -21,56 +20,10 @@ from .workflow import (
 )
 
 
-class _SqlglotWarningCapture(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__(level=logging.WARNING)
-        self.messages: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(record.getMessage())
-
-
-@contextmanager
-def _capture_sqlglot_warnings() -> list[str]:
-    logger = logging.getLogger("sqlglot")
-    handler = _SqlglotWarningCapture()
-    previous_handlers = list(logger.handlers)
-    previous_level = logger.level
-    previous_propagate = logger.propagate
-    logger.handlers = [handler]
-    logger.setLevel(logging.WARNING)
-    logger.propagate = False
-    try:
-        yield handler.messages
-    finally:
-        logger.handlers = previous_handlers
-        logger.setLevel(previous_level)
-        logger.propagate = previous_propagate
-
-
 def _summarize_sqlglot_warnings(messages: list[str]) -> str | None:
-    if not messages:
-        return None
-    unique_messages: list[str] = []
-    for message in messages:
-        if message not in unique_messages:
-            unique_messages.append(message)
-    example_count = min(3, len(unique_messages))
-    examples = "; ".join(_single_line_warning(message) for message in unique_messages[:example_count])
-    summary = (
-        f"Notice: sqlglot used fallback parsing for {len(messages)} statement(s) "
-        f"({len(unique_messages)} unique pattern(s))."
-    )
-    if examples:
-        summary += f" Examples: {examples}"
-    return summary
+    from .diagnostics import summarize_sqlglot_warnings
 
-
-def _single_line_warning(message: str, max_length: int = 140) -> str:
-    flattened = " ".join(part for part in message.split())
-    if len(flattened) <= max_length:
-        return flattened
-    return flattened[: max_length - 3] + "..."
+    return summarize_sqlglot_warnings(messages)
 
 
 def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
@@ -435,6 +388,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
     prepared = operation.prepared
     snapshot = prepared.snapshot
     output_sql = snapshot.obfuscated_sql
+    _render_sqlglot_diagnostics(operation.diagnostics)
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -486,6 +440,12 @@ def _render_llm_safety_decision(
     )
 
 
+def _render_sqlglot_diagnostics(diagnostics: tuple[WorkflowDiagnostic, ...]) -> None:
+    summary = summarize_sqlglot_diagnostics(diagnostics)
+    if summary:
+        print(summary, file=sys.stderr)
+
+
 def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     operation = LocalWorkspaceApplication().apply_and_save_statement_replacements(
@@ -496,6 +456,7 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     )
     result = operation.replacement
     report = result.report
+    _render_sqlglot_diagnostics(operation.diagnostics)
 
     print("apply-llm-edits summary:")
     print(f"applied_edit_count: {report.get('applied_edit_count', 0)}")
@@ -526,6 +487,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
                 allow_low_confidence=bool(args.allow_low_confidence),
             ).deobfuscation
         except DeobfuscationSafetyError as exc:
+            _render_sqlglot_diagnostics(exc.result.diagnostics)
             if exc.reason == "unresolved":
                 raise WorkspaceError(
                     "De-obfuscation found unresolved mappings. "
@@ -535,6 +497,7 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
                 "De-obfuscation found low-confidence mappings. "
                 "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
             ) from exc
+    _render_sqlglot_diagnostics(result.diagnostics)
     if args.dry_run:
         print("deobfuscate dry-run summary:")
         _print_deobfuscation_summary(result.summary, include_kind_breakdown=True)
@@ -561,6 +524,7 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
         ).deobfuscation
     except DeobfuscationSafetyError as exc:
         _print_validate_before_write_summary(exc.result.summary)
+        _render_sqlglot_diagnostics(exc.result.diagnostics)
         if exc.reason == "unresolved":
             raise WorkspaceError(
                 "Validation failed: unresolved mappings found. "
@@ -572,6 +536,7 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
         ) from exc
 
     _print_validate_before_write_summary(result.summary)
+    _render_sqlglot_diagnostics(result.diagnostics)
 
     print("validation passed: wrote de-obfuscated output")
     print(result.deobfuscated_sql)
@@ -630,6 +595,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
     prepared = operation.prepared
     result = operation.roundtrip
     snapshot = prepared.snapshot
+    _render_sqlglot_diagnostics(operation.diagnostics)
     _render_llm_safety_decision(
         safety=prepared.safety,
         llm_safe_requested=bool(args.llm_safe),
@@ -716,6 +682,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
     )
     workflow_result = operation.translation
     result = workflow_result.translation
+    _render_sqlglot_diagnostics(operation.diagnostics)
 
     summary = workflow_result.summary
     print(
@@ -755,33 +722,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_command_parser()
     args = parser.parse_args(argv)
 
-    with _capture_sqlglot_warnings() as sqlglot_warnings:
-        try:
-            if args.command == "obfuscate":
-                rc = _run_obfuscate_command(args)
-            elif args.command == "deobfuscate":
-                rc = _run_deobfuscate_command(args)
-            elif args.command == "roundtrip":
-                rc = _run_roundtrip_command(args)
-            elif args.command == "validate-before-write":
-                rc = _run_validate_before_write_command(args)
-            elif args.command == "apply-llm-edits":
-                rc = _run_apply_llm_edits_command(args)
-            elif args.command == "workspace-info":
-                rc = _run_workspace_info_command(args)
-            elif args.command == "translate":
-                rc = _run_translate_command(args)
-            else:
-                raise WorkspaceError(f"Unknown command: {args.command}")
-        except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
-            summary = _summarize_sqlglot_warnings(sqlglot_warnings)
-            if summary:
-                print(summary, file=sys.stderr)
-            presentation = present_application_error(exc)
-            print(f"Error: {presentation.message}", file=sys.stderr)
-            return 1
-
-    summary = _summarize_sqlglot_warnings(sqlglot_warnings)
-    if summary:
-        print(summary, file=sys.stderr)
-    return rc
+    try:
+        if args.command == "obfuscate":
+            return _run_obfuscate_command(args)
+        if args.command == "deobfuscate":
+            return _run_deobfuscate_command(args)
+        if args.command == "roundtrip":
+            return _run_roundtrip_command(args)
+        if args.command == "validate-before-write":
+            return _run_validate_before_write_command(args)
+        if args.command == "apply-llm-edits":
+            return _run_apply_llm_edits_command(args)
+        if args.command == "workspace-info":
+            return _run_workspace_info_command(args)
+        if args.command == "translate":
+            return _run_translate_command(args)
+        raise WorkspaceError(f"Unknown command: {args.command}")
+    except (ObfuscatorError, ParseScriptError, WorkspaceError) as exc:
+        presentation = present_application_error(exc)
+        print(f"Error: {presentation.message}", file=sys.stderr)
+        return 1

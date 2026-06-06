@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import zip_longest
-from typing import Any
+from typing import Any, Iterable
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,73 @@ class WorkflowDiagnostic:
     identifier_kind: str | None = None
     batch_index: int | None = None
     statement_index: int | None = None
+
+
+class _SqlglotWarningCapture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@contextmanager
+def capture_sqlglot_warnings():
+    logger = logging.getLogger("sqlglot")
+    handler = _SqlglotWarningCapture()
+    previous_handlers = list(logger.handlers)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    logger.handlers = [handler]
+    logger.setLevel(logging.WARNING)
+    logger.propagate = False
+    try:
+        yield handler.messages
+    finally:
+        logger.handlers = previous_handlers
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+
+def sqlglot_warning_diagnostics(messages: Iterable[str]) -> tuple[WorkflowDiagnostic, ...]:
+    return tuple(
+        WorkflowDiagnostic(
+            severity="warning",
+            code="sqlglot.fallback_parse",
+            message=message,
+            recommendation="Review parser fallback output before relying on transformed SQL.",
+        )
+        for message in messages
+        if message
+    )
+
+
+def summarize_sqlglot_warnings(messages: Iterable[str]) -> str | None:
+    warning_messages = list(messages)
+    if not warning_messages:
+        return None
+    unique_messages: list[str] = []
+    for message in warning_messages:
+        if message not in unique_messages:
+            unique_messages.append(message)
+    example_count = min(3, len(unique_messages))
+    examples = "; ".join(_single_line_warning(message) for message in unique_messages[:example_count])
+    summary = (
+        f"Notice: sqlglot used fallback parsing for {len(warning_messages)} statement(s) "
+        f"({len(unique_messages)} unique pattern(s))."
+    )
+    if examples:
+        summary += f" Examples: {examples}"
+    return summary
+
+
+def summarize_sqlglot_diagnostics(diagnostics: Iterable[WorkflowDiagnostic]) -> str | None:
+    return summarize_sqlglot_warnings(
+        diagnostic.message
+        for diagnostic in diagnostics
+        if diagnostic.code == "sqlglot.fallback_parse"
+    )
 
 
 def privacy_diagnostics(summary: dict[str, Any]) -> tuple[WorkflowDiagnostic, ...]:
@@ -217,3 +286,10 @@ def _optional_str(value: Any) -> str | None:
 
 def _optional_int(value: Any) -> int | None:
     return value if isinstance(value, int) else None
+
+
+def _single_line_warning(message: str, max_length: int = 140) -> str:
+    flattened = " ".join(part for part in message.split())
+    if len(flattened) <= max_length:
+        return flattened
+    return flattened[: max_length - 3] + "..."

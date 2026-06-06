@@ -1434,6 +1434,21 @@ def test_cli_obfuscate_warns_when_fallback_preserved_statements_exist(tmp_path: 
     assert "fallback_preserved_statements" in privacy_report["blocking_identifier_classes"]
 
 
+def test_cli_obfuscate_prints_sqlglot_fallback_notice_from_diagnostics(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",
+        encoding="utf-8",
+    )
+
+    rc = main(["obfuscate", str(sql_file)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Notice: sqlglot used fallback parsing" in captured.err
+    assert "contains unsupported syntax" in captured.err
+
+
 def test_cli_roundtrip_warns_when_fallback_preserved_statements_exist(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
     sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")

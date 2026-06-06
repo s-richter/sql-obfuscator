@@ -35,6 +35,26 @@ def test_local_application_prepares_and_inspects_workspace_without_printing(
     assert inspection.artifacts["obfuscated.sql"] is True
 
 
+def test_local_application_exposes_sqlglot_warning_diagnostics_without_printing(
+    tmp_path: Path,
+    capsys,
+):
+    operation = LocalWorkspaceApplication().prepare_and_save_workspace(
+        "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",
+        input_path=tmp_path / "sample.sql",
+        workspace_path=tmp_path / "sample.obf",
+    )
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert captured.err == ""
+    assert any(
+        diagnostic.code == "sqlglot.fallback_parse"
+        for diagnostic in operation.diagnostics
+    )
+
+
 def test_local_application_opens_workspace_as_read_only_artifact_tree(tmp_path: Path):
     app = LocalWorkspaceApplication()
     workspace_path = tmp_path / "sample.obf"

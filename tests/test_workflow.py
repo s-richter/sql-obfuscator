@@ -77,6 +77,25 @@ def test_prepare_workspace_returns_expert_mode_blockers_and_warnings():
     assert prepared.snapshot.llm_workflow_report["llm_safe_approved"] is False
 
 
+def test_prepare_workspace_returns_structured_sqlglot_warning_diagnostics(capsys):
+    prepared = prepare_workspace(
+        "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",
+        input_name="input.sql",
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    sqlglot_diagnostics = [
+        diagnostic
+        for diagnostic in prepared.diagnostics
+        if diagnostic.code == "sqlglot.fallback_parse"
+    ]
+    assert sqlglot_diagnostics
+    assert all(diagnostic.severity == "warning" for diagnostic in sqlglot_diagnostics)
+    assert "Falling back to parsing as a 'Command'" in sqlglot_diagnostics[0].message
+
+
 def test_prepare_workspace_llm_safe_mode_fails_closed_with_prepared_workspace():
     with pytest.raises(LlmSafetyError) as exc_info:
         prepare_workspace(
