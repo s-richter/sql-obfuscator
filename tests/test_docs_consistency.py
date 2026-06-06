@@ -61,6 +61,11 @@ def test_storage_seam_decision_is_recorded_as_durable_architecture_doc():
     assert "LocalWorkspaceStore" in adr_text
     assert "WorkspaceStore protocol" in adr_text
     assert "defer" in adr_text.lower()
+    assert "tenant web storage" in adr_text
+    assert "`tenant_id`" in adr_text
+    assert "`workspace_id`" in adr_text
+    assert "opaque server-generated workspace ID" in adr_text
+    assert "Minimum Contract Tests For Tenant Web Storage" in adr_text
     for trigger in (
         "web tenant storage",
         "desktop project storage",
