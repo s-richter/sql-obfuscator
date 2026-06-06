@@ -133,6 +133,16 @@ def test_local_workspace_store_inspects_workspace_artifacts(tmp_path: Path):
     assert inspection.artifacts["original.sql"] is True
     assert inspection.artifacts["reports/privacy_summary.json"] is True
     assert inspection.artifacts["translated.sql"] is False
+    artifacts = {artifact.relative_path: artifact for artifact in inspection.artifact_statuses}
+    assert artifacts["original.sql"].available is True
+    assert artifacts["original.sql"].kind == "original_sql"
+    assert artifacts["original.sql"].media_type == "text/sql"
+    assert artifacts["original.sql"].read_only is True
+    assert artifacts["original.sql"].integrity_protected is True
+    assert artifacts["translated.sql"].available is False
+    assert artifacts["translated.sql"].integrity_protected is False
+    assert artifacts["reports/privacy_summary.json"].available is True
+    assert artifacts["reports/privacy_summary.json"].integrity_protected is False
 
 
 def test_local_workspace_store_inspect_rejects_missing_workspace(tmp_path: Path):

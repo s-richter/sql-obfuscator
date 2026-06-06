@@ -194,11 +194,16 @@ inspection = LocalWorkspaceStore().inspect_workspace(Path("script.obf"))
 print(inspection.dialect)
 print(inspection.integrity_algorithm)
 print(inspection.artifacts["reports/privacy_summary.json"])
+
+for artifact in inspection.artifact_statuses:
+    print(artifact.relative_path, artifact.kind, artifact.available)
 ```
 
 `inspect_workspace()` validates integrity and returns structured settings, counts, privacy
-flags, and artifact availability. The CLI renders this result as text. A desktop host can
-render an artifact tree, and a web host can expose the same facts on a workspace page.
+flags, and an ordered artifact inventory with media type, availability, read-only status,
+and integrity protection metadata. `inspection.artifacts` remains a path-to-availability
+shortcut for compatibility. The CLI renders this result as text. A desktop host can render
+an artifact tree, and a web host can expose the same facts on a workspace page.
 
 ## Browse Local Workspace Artifacts
 

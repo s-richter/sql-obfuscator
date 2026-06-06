@@ -33,6 +33,12 @@ def test_local_application_prepares_and_inspects_workspace_without_printing(
     assert workspace_path / "obfuscated.sql" in operation.written_artifact_paths
     assert inspection.seed == 42
     assert inspection.artifacts["obfuscated.sql"] is True
+    artifacts = {artifact.relative_path: artifact for artifact in inspection.artifact_statuses}
+    assert artifacts["obfuscated.sql"].available is True
+    assert artifacts["obfuscated.sql"].media_type == "text/sql"
+    assert artifacts["obfuscated.sql"].read_only is True
+    assert artifacts["obfuscated.sql"].integrity_protected is True
+    assert artifacts["translated.sql"].available is False
 
 
 def test_local_application_exposes_sqlglot_warning_diagnostics_without_printing(
@@ -69,6 +75,7 @@ def test_local_application_opens_workspace_as_read_only_artifact_tree(tmp_path: 
 
     assert workspace.workspace_path == workspace_path
     assert workspace.inspection.artifacts["obfuscated.sql"] is True
+    assert workspace.artifacts == workspace.inspection.artifact_statuses
     assert artifacts["original.sql"].available is True
     assert artifacts["original.sql"].read_only is True
     assert artifacts["original.sql"].integrity_protected is True

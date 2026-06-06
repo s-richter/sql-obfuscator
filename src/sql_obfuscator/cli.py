@@ -641,9 +641,9 @@ def _format_workspace_inspection(inspection: WorkspaceInspection) -> str:
         f"integrity algorithm: {inspection.integrity_algorithm}",
         f"integrity tracked files: {inspection.integrity_tracked_file_count}",
     ]
-    for rel_path, available in inspection.artifacts.items():
-        lines.append(f"{rel_path}: {'yes' if available else 'no'}")
-        if rel_path == "reports/privacy_summary.json":
+    for artifact in inspection.artifact_statuses:
+        lines.append(f"{artifact.relative_path}: {'yes' if artifact.available else 'no'}")
+        if artifact.relative_path == "reports/privacy_summary.json":
             lines.append(
                 "privacy llm-safe blocked: "
                 f"{inspection.privacy_llm_safe_blocked if inspection.privacy_llm_safe_blocked is not None else 'n/a'}"
