@@ -47,6 +47,12 @@ class LlmSafetyDecision:
     warnings: tuple[str, ...]
     diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
+    @property
+    def findings(self) -> tuple[str, ...]:
+        if self.diagnostics:
+            return tuple(diagnostic.message for diagnostic in self.diagnostics)
+        return (*self.blockers, *self.warnings)
+
 
 @dataclass(frozen=True)
 class PreparedWorkspace:
@@ -75,10 +81,39 @@ class DeobfuscationSafetyDecision:
 
 
 @dataclass(frozen=True)
+class DeobfuscationSummary:
+    mapped_identifiers: int
+    unknown_count: int
+    ambiguous_count: int
+    low_confidence_count: int
+    unknown_by_kind: dict[str, Any]
+    ambiguous_by_kind: dict[str, Any]
+    low_confidence_by_kind: dict[str, Any]
+    matched_statement_anchor_count: int
+    unmatched_statement_anchor_count: int
+    redaction_unknown_placeholder_count: int | None
+    redaction_missing_placeholder_count: int | None
+    recommendations: tuple[str, ...]
+
+    def llm_workflow_payload(self) -> dict[str, Any]:
+        return {
+            "mapped_identifiers": self.mapped_identifiers,
+            "unknown_count": self.unknown_count,
+            "ambiguous_count": self.ambiguous_count,
+            "low_confidence_count": self.low_confidence_count,
+            "matched_statement_anchor_count": self.matched_statement_anchor_count,
+            "unmatched_statement_anchor_count": self.unmatched_statement_anchor_count,
+            "redaction_unknown_placeholder_count": self.redaction_unknown_placeholder_count or 0,
+            "redaction_missing_placeholder_count": self.redaction_missing_placeholder_count or 0,
+        }
+
+
+@dataclass(frozen=True)
 class DeobfuscationResult:
     deobfuscated_sql: str
     report: dict[str, Any]
     safety: DeobfuscationSafetyDecision
+    summary: DeobfuscationSummary
     llm_workflow_report: dict[str, Any]
     diagnostics: tuple[WorkflowDiagnostic, ...] = ()
 
@@ -113,7 +148,17 @@ class TranslationOptions:
 class TranslationWorkflowResult:
     translation: TranslationResult
     succeeded: bool
+    summary: TranslationSummary
     diagnostics: tuple[WorkflowDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class TranslationSummary:
+    source_dialect: str
+    target_dialect: str
+    statement_count: int
+    failed_statement_count: int
+    warning_count: int
 
 
 class LlmSafetyError(WorkspaceError):
@@ -242,14 +287,17 @@ def analyze_deobfuscation(
         )
         report["redaction"] = redaction_report
     safety = _deobfuscation_safety(report)
+    summary = _deobfuscation_summary(report, safety=safety)
     return DeobfuscationResult(
         deobfuscated_sql=deobfuscated_sql,
         report=report,
         safety=safety,
+        summary=summary,
         diagnostics=deobfuscation_diagnostics(report),
         llm_workflow_report=_updated_llm_workflow_report(
             snapshot.llm_workflow_report,
             deobfuscation_report=report,
+            deobfuscation_summary=summary,
         ),
     )
 
@@ -369,6 +417,13 @@ def translate_document(
             result.failed_statement_count == 0
             and (not options.validate or result.validated)
         ),
+        summary=TranslationSummary(
+            source_dialect=result.source_dialect,
+            target_dialect=result.target_dialect,
+            statement_count=result.statement_count,
+            failed_statement_count=result.failed_statement_count,
+            warning_count=len(result.warnings),
+        ),
         diagnostics=translation_diagnostics(result),
     )
 
@@ -479,6 +534,7 @@ def _updated_llm_workflow_report(
     current_report: dict[str, Any],
     *,
     deobfuscation_report: dict[str, Any],
+    deobfuscation_summary: DeobfuscationSummary,
 ) -> dict[str, Any]:
     recommendations: list[str] = []
     for recommendation in current_report.get("recommendations", []):
@@ -489,20 +545,39 @@ def _updated_llm_workflow_report(
             recommendations.append(recommendation)
     return {
         **current_report,
-        "deobfuscation_summary": _deobfuscation_summary(deobfuscation_report),
+        "deobfuscation_summary": deobfuscation_summary.llm_workflow_payload(),
         "recommendations": recommendations,
     }
 
 
-def _deobfuscation_summary(report: dict[str, Any]) -> dict[str, Any]:
-    safety = _deobfuscation_safety(report)
-    return {
-        "mapped_identifiers": report.get("mapped_identifiers", 0),
-        "unknown_count": safety.unknown_identifier_count,
-        "ambiguous_count": safety.ambiguous_identifier_count,
-        "low_confidence_count": safety.low_confidence_mapping_count,
-        "matched_statement_anchor_count": report.get("matched_statement_anchor_count", 0),
-        "unmatched_statement_anchor_count": report.get("unmatched_statement_anchor_count", 0),
-        "redaction_unknown_placeholder_count": safety.unknown_placeholder_count,
-        "redaction_missing_placeholder_count": safety.missing_placeholder_count,
-    }
+def _deobfuscation_summary(
+    report: dict[str, Any],
+    *,
+    safety: DeobfuscationSafetyDecision,
+) -> DeobfuscationSummary:
+    redaction_report = report.get("redaction")
+    has_redaction_report = isinstance(redaction_report, dict)
+    return DeobfuscationSummary(
+        mapped_identifiers=int(report.get("mapped_identifiers", 0)),
+        unknown_count=safety.unknown_identifier_count,
+        ambiguous_count=safety.ambiguous_identifier_count,
+        low_confidence_count=safety.low_confidence_mapping_count,
+        unknown_by_kind=_dict_or_empty(report.get("unknown_by_kind")),
+        ambiguous_by_kind=_dict_or_empty(report.get("ambiguous_by_kind")),
+        low_confidence_by_kind=_dict_or_empty(report.get("low_confidence_by_kind")),
+        matched_statement_anchor_count=int(report.get("matched_statement_anchor_count", 0)),
+        unmatched_statement_anchor_count=int(report.get("unmatched_statement_anchor_count", 0)),
+        redaction_unknown_placeholder_count=(
+            safety.unknown_placeholder_count if has_redaction_report else None
+        ),
+        redaction_missing_placeholder_count=(
+            safety.missing_placeholder_count if has_redaction_report else None
+        ),
+        recommendations=tuple(
+            item for item in report.get("recommendations", []) if isinstance(item, str)
+        ),
+    )
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}

@@ -318,6 +318,9 @@ def test_analyze_deobfuscation_restores_identifiers_in_memory(capsys):
     assert result.report["ambiguous_count"] == 0
     assert result.safety.has_unresolved is False
     assert result.safety.has_low_confidence is False
+    assert result.summary.unknown_count == 0
+    assert result.summary.ambiguous_count == 0
+    assert result.summary.mapped_identifiers > 0
     assert result.llm_workflow_report["deobfuscation_summary"]["mapped_identifiers"] > 0
 
 
@@ -559,6 +562,9 @@ def test_translate_document_returns_structured_success_result():
     assert result.succeeded is True
     assert result.translation.validated is True
     assert result.translation.failed_statement_count == 0
+    assert result.summary.source_dialect == "tsql"
+    assert result.summary.target_dialect == "hive"
+    assert result.summary.failed_statement_count == 0
     assert "UserId" in result.translation.output_sql
 
 

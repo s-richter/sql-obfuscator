@@ -14,6 +14,7 @@ from .local_application import LocalWorkspaceApplication
 from .local_workspace_store import WorkspaceInspection
 from .workflow import (
     DeobfuscationSafetyError,
+    DeobfuscationSummary,
     LlmSafetyDecision,
     ObfuscationOptions,
     TranslationOptions,
@@ -467,11 +468,7 @@ def _render_llm_safety_decision(
     safety: LlmSafetyDecision,
     llm_safe_requested: bool,
 ) -> None:
-    findings = (
-        [diagnostic.message for diagnostic in safety.diagnostics]
-        if safety.diagnostics
-        else [*safety.blockers, *safety.warnings]
-    )
+    findings = list(safety.findings)
     if not findings:
         return
     detail = _summarize_llm_safe_findings(findings)
@@ -538,21 +535,10 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
                 "De-obfuscation found low-confidence mappings. "
                 "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
             ) from exc
-    report = result.report
     if args.dry_run:
         print("deobfuscate dry-run summary:")
-        print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
-        print(f"unknown_count: {report.get('unknown_count', 0)}")
-        print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
-        print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
-        print(f"unknown_by_kind: {report.get('unknown_by_kind', {})}")
-        print(f"ambiguous_by_kind: {report.get('ambiguous_by_kind', {})}")
-        print(f"low_confidence_by_kind: {report.get('low_confidence_by_kind', {})}")
-        redaction_report = report.get("redaction")
-        if isinstance(redaction_report, dict):
-            print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
-            print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
-        for recommendation in report.get("recommendations", []):
+        _print_deobfuscation_summary(result.summary, include_kind_breakdown=True)
+        for recommendation in result.summary.recommendations:
             print(f"recommendation: {recommendation}")
         if result.safety.has_unresolved:
             return 1
@@ -574,7 +560,7 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
             allow_low_confidence=bool(args.allow_low_confidence),
         ).deobfuscation
     except DeobfuscationSafetyError as exc:
-        _print_validate_before_write_summary(exc.result.report)
+        _print_validate_before_write_summary(exc.result.summary)
         if exc.reason == "unresolved":
             raise WorkspaceError(
                 "Validation failed: unresolved mappings found. "
@@ -585,23 +571,34 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
             "Use --allow-low-confidence to force output."
         ) from exc
 
-    _print_validate_before_write_summary(result.report)
+    _print_validate_before_write_summary(result.summary)
 
     print("validation passed: wrote de-obfuscated output")
     print(result.deobfuscated_sql)
     return 0
 
 
-def _print_validate_before_write_summary(report: dict) -> None:
+def _print_validate_before_write_summary(summary: DeobfuscationSummary) -> None:
     print("validate-before-write summary:")
-    print(f"mapped_identifiers: {report.get('mapped_identifiers', 0)}")
-    print(f"unknown_count: {report.get('unknown_count', 0)}")
-    print(f"ambiguous_count: {report.get('ambiguous_count', 0)}")
-    print(f"low_confidence_count: {report.get('low_confidence_count', 0)}")
-    redaction_report = report.get("redaction")
-    if isinstance(redaction_report, dict):
-        print(f"redaction_unknown_placeholder_count: {redaction_report.get('unknown_placeholder_count', 0)}")
-        print(f"redaction_missing_placeholder_count: {redaction_report.get('missing_placeholder_count', 0)}")
+    _print_deobfuscation_summary(summary, include_kind_breakdown=False)
+
+
+def _print_deobfuscation_summary(
+    summary: DeobfuscationSummary,
+    *,
+    include_kind_breakdown: bool,
+) -> None:
+    print(f"mapped_identifiers: {summary.mapped_identifiers}")
+    print(f"unknown_count: {summary.unknown_count}")
+    print(f"ambiguous_count: {summary.ambiguous_count}")
+    print(f"low_confidence_count: {summary.low_confidence_count}")
+    if include_kind_breakdown:
+        print(f"unknown_by_kind: {summary.unknown_by_kind}")
+        print(f"ambiguous_by_kind: {summary.ambiguous_by_kind}")
+        print(f"low_confidence_by_kind: {summary.low_confidence_by_kind}")
+    if summary.redaction_unknown_placeholder_count is not None:
+        print(f"redaction_unknown_placeholder_count: {summary.redaction_unknown_placeholder_count}")
+        print(f"redaction_missing_placeholder_count: {summary.redaction_missing_placeholder_count}")
 
 
 def _run_roundtrip_command(args: argparse.Namespace) -> int:
@@ -720,13 +717,14 @@ def _run_translate_command(args: argparse.Namespace) -> int:
     workflow_result = operation.translation
     result = workflow_result.translation
 
+    summary = workflow_result.summary
     print(
         "translate summary: "
-        f"source={result.source_dialect} "
-        f"target={result.target_dialect} "
-        f"statements={result.statement_count} "
-        f"failed={result.failed_statement_count} "
-        f"warnings={len(result.warnings)}"
+        f"source={summary.source_dialect} "
+        f"target={summary.target_dialect} "
+        f"statements={summary.statement_count} "
+        f"failed={summary.failed_statement_count} "
+        f"warnings={summary.warning_count}"
     )
 
     if not workflow_result.succeeded:
