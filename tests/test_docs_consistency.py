@@ -28,6 +28,14 @@ def test_cli_reference_mentions_key_cli_flags():
     assert "## Current Limits" in readme_text
 
 
+def test_readme_external_llm_example_describes_redaction_mode_flag():
+    root = Path(__file__).resolve().parents[1]
+    readme_text = (root / "README.md").read_text(encoding="utf-8")
+
+    assert "`--redaction-mode irreversible`" in readme_text
+    assert "without preserving original values for restoration" in readme_text
+
+
 def test_cli_reference_and_cli_help_match_recent_flags():
     root = Path(__file__).resolve().parents[1]
     reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
