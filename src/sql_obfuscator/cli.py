@@ -455,14 +455,14 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
         persist=not args.dry_run,
     )
     result = operation.replacement
-    report = result.report
+    summary = operation.summary.replacement
     _render_sqlglot_diagnostics(operation.diagnostics)
 
     print("apply-llm-edits summary:")
-    print(f"applied_edit_count: {report.get('applied_edit_count', 0)}")
-    print(f"untouched_statement_count: {report.get('untouched_statement_count', 0)}")
-    print(f"statement_count: {report.get('statement_count', 0)}")
-    print(f"targeted_statement_ids: {report.get('targeted_statement_ids', [])}")
+    print(f"applied_edit_count: {summary.applied_edit_count}")
+    print(f"untouched_statement_count: {summary.untouched_statement_count}")
+    print(f"statement_count: {summary.statement_count}")
+    print(f"targeted_statement_ids: {list(summary.targeted_statement_ids)}")
 
     if args.dry_run:
         return 0
@@ -476,16 +476,16 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     edited_sql = _read_sql_file(Path(args.input))
     application = LocalWorkspaceApplication()
     if args.dry_run:
-        result = application.analyze_deobfuscation(workspace_path, edited_sql).deobfuscation
+        operation = application.analyze_deobfuscation(workspace_path, edited_sql)
     else:
         try:
-            result = application.deobfuscate_and_save(
+            operation = application.deobfuscate_and_save(
                 workspace_path,
                 edited_sql,
                 output_path=Path(args.out) if args.out else None,
                 allow_unresolved=bool(args.allow_unresolved),
                 allow_low_confidence=bool(args.allow_low_confidence),
-            ).deobfuscation
+            )
         except DeobfuscationSafetyError as exc:
             _render_sqlglot_diagnostics(exc.result.diagnostics)
             if exc.reason == "unresolved":
@@ -497,13 +497,15 @@ def _run_deobfuscate_command(args: argparse.Namespace) -> int:
                 "De-obfuscation found low-confidence mappings. "
                 "Use --dry-run for diagnostics or pass --allow-low-confidence to force output."
             ) from exc
-    _render_sqlglot_diagnostics(result.diagnostics)
+    result = operation.deobfuscation
+    operation_summary = operation.summary
+    _render_sqlglot_diagnostics(operation.diagnostics)
     if args.dry_run:
         print("deobfuscate dry-run summary:")
-        _print_deobfuscation_summary(result.summary, include_kind_breakdown=True)
-        for recommendation in result.summary.recommendations:
+        _print_deobfuscation_summary(operation_summary.deobfuscation, include_kind_breakdown=True)
+        for recommendation in operation_summary.deobfuscation.recommendations:
             print(f"recommendation: {recommendation}")
-        if result.safety.has_unresolved:
+        if operation_summary.has_unresolved:
             return 1
         return 0
 
@@ -515,13 +517,13 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     edited_sql = _read_sql_file(Path(args.input))
     try:
-        result = LocalWorkspaceApplication().validate_and_save_deobfuscation(
+        operation = LocalWorkspaceApplication().validate_and_save_deobfuscation(
             workspace_path,
             edited_sql,
             output_path=Path(args.out) if args.out else None,
             allow_unresolved=bool(args.allow_unresolved),
             allow_low_confidence=bool(args.allow_low_confidence),
-        ).deobfuscation
+        )
     except DeobfuscationSafetyError as exc:
         _print_validate_before_write_summary(exc.result.summary)
         _render_sqlglot_diagnostics(exc.result.diagnostics)
@@ -535,8 +537,9 @@ def _run_validate_before_write_command(args: argparse.Namespace) -> int:
             "Use --allow-low-confidence to force output."
         ) from exc
 
-    _print_validate_before_write_summary(result.summary)
-    _render_sqlglot_diagnostics(result.diagnostics)
+    result = operation.deobfuscation
+    _print_validate_before_write_summary(operation.summary.deobfuscation)
+    _render_sqlglot_diagnostics(operation.diagnostics)
 
     print("validation passed: wrote de-obfuscated output")
     print(result.deobfuscated_sql)
@@ -684,7 +687,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
     result = workflow_result.translation
     _render_sqlglot_diagnostics(operation.diagnostics)
 
-    summary = workflow_result.summary
+    summary = operation.summary.translation
     print(
         "translate summary: "
         f"source={summary.source_dialect} "
@@ -694,7 +697,7 @@ def _run_translate_command(args: argparse.Namespace) -> int:
         f"warnings={summary.warning_count}"
     )
 
-    if not workflow_result.succeeded:
+    if not operation.summary.succeeded:
         return 1
     if args.report_only:
         return 0

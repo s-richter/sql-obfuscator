@@ -145,6 +145,10 @@ def test_apply_statement_replacements_returns_applied_sql_and_report_in_memory(c
     assert result.applied_obfuscated_sql == "SELECT 1"
     assert result.report["applied_edit_count"] == 1
     assert result.report["targeted_statement_ids"] == ["stmt_0001"]
+    assert result.summary.applied_edit_count == 1
+    assert result.summary.untouched_statement_count == 0
+    assert result.summary.statement_count == 1
+    assert result.summary.targeted_statement_ids == ("stmt_0001",)
 
 
 def test_apply_statement_replacements_preserves_untouched_statement_exactly():
@@ -177,6 +181,7 @@ def test_apply_statement_replacements_preserves_untouched_statement_exactly():
     )
     assert first_anchor["obfuscated_sql"] in result.applied_obfuscated_sql
     assert result.report["untouched_statement_count"] == 1
+    assert result.summary.untouched_statement_count == 1
 
 
 def test_apply_statement_replacements_rejects_unknown_statement_id():

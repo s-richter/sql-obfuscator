@@ -67,9 +67,18 @@ class PreparedWorkspace:
 
 
 @dataclass(frozen=True)
+class StatementReplacementSummary:
+    applied_edit_count: int
+    untouched_statement_count: int
+    statement_count: int
+    targeted_statement_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StatementReplacementResult:
     applied_obfuscated_sql: str
     report: dict[str, Any]
+    summary: StatementReplacementSummary
 
 
 @dataclass(frozen=True)
@@ -277,6 +286,18 @@ def apply_statement_replacements(
     return StatementReplacementResult(
         applied_obfuscated_sql=applied_obfuscated_sql,
         report=report,
+        summary=_statement_replacement_summary(report),
+    )
+
+
+def _statement_replacement_summary(report: dict[str, Any]) -> StatementReplacementSummary:
+    return StatementReplacementSummary(
+        applied_edit_count=int(report.get("applied_edit_count", 0)),
+        untouched_statement_count=int(report.get("untouched_statement_count", 0)),
+        statement_count=int(report.get("statement_count", 0)),
+        targeted_statement_ids=tuple(
+            item for item in report.get("targeted_statement_ids", ()) if isinstance(item, str)
+        ),
     )
 
 

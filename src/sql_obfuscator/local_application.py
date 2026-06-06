@@ -14,13 +14,16 @@ from .local_workspace_store import (
     WorkspaceInspection,
 )
 from .workflow import (
+    DeobfuscationSummary,
     DeobfuscationResult,
     LlmSafetyError,
     ObfuscationOptions,
     PreparedWorkspace,
     RoundtripResult,
     StatementReplacementResult,
+    StatementReplacementSummary,
     TranslationOptions,
+    TranslationSummary,
     TranslationWorkflowResult,
     analyze_deobfuscation,
     apply_statement_replacements,
@@ -33,11 +36,31 @@ from .workflow import (
 
 
 @dataclass(frozen=True)
+class LocalWorkspacePreparationSummary:
+    workspace_path: Path
+    written_artifact_paths: tuple[Path, ...]
+    llm_safe_approved: bool
+    blocker_count: int
+    warning_count: int
+    diagnostic_count: int
+
+
+@dataclass(frozen=True)
 class LocalWorkspacePreparation:
     prepared: PreparedWorkspace
     workspace_path: Path
     written_artifact_paths: tuple[Path, ...]
     diagnostics: tuple[WorkflowDiagnostic, ...]
+    summary: LocalWorkspacePreparationSummary
+
+
+@dataclass(frozen=True)
+class LocalStatementReplacementSummary:
+    workspace_path: Path
+    output_path: Path | None
+    written_artifact_paths: tuple[Path, ...]
+    persisted: bool
+    replacement: StatementReplacementSummary
 
 
 @dataclass(frozen=True)
@@ -46,7 +69,19 @@ class LocalStatementReplacement:
     workspace_path: Path
     output_path: Path | None
     written_artifact_paths: tuple[Path, ...]
+    summary: LocalStatementReplacementSummary
     diagnostics: tuple[WorkflowDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class LocalDeobfuscationSummary:
+    workspace_path: Path
+    output_path: Path | None
+    written_artifact_paths: tuple[Path, ...]
+    persisted: bool
+    deobfuscation: DeobfuscationSummary
+    has_unresolved: bool
+    has_low_confidence: bool
 
 
 @dataclass(frozen=True)
@@ -56,6 +91,17 @@ class LocalDeobfuscation:
     output_path: Path | None
     written_artifact_paths: tuple[Path, ...]
     diagnostics: tuple[WorkflowDiagnostic, ...]
+    summary: LocalDeobfuscationSummary
+
+
+@dataclass(frozen=True)
+class LocalRoundtripSummary:
+    workspace_path: Path
+    written_artifact_paths: tuple[Path, ...]
+    completed: bool
+    exact_match: bool | None
+    normalized_exact_match: bool | None
+    deobfuscation: DeobfuscationSummary | None
 
 
 @dataclass(frozen=True)
@@ -65,6 +111,17 @@ class LocalRoundtrip:
     workspace_path: Path
     written_artifact_paths: tuple[Path, ...]
     diagnostics: tuple[WorkflowDiagnostic, ...]
+    summary: LocalRoundtripSummary
+
+
+@dataclass(frozen=True)
+class LocalTranslationSummary:
+    workspace_path: Path | None
+    written_artifact_paths: tuple[Path, ...]
+    succeeded: bool
+    translated_sql_persisted: bool
+    translation_report_persisted: bool
+    translation: TranslationSummary
 
 
 @dataclass(frozen=True)
@@ -73,6 +130,7 @@ class LocalTranslation:
     workspace_path: Path | None
     written_artifact_paths: tuple[Path, ...]
     diagnostics: tuple[WorkflowDiagnostic, ...]
+    summary: LocalTranslationSummary
 
 
 class LocalWorkspaceApplication:
@@ -125,14 +183,23 @@ class LocalWorkspaceApplication:
             ),
         )
         self.store.load_workspace_snapshot(resolved_workspace_path)
+        written_paths = self._existing_paths(
+            resolved_workspace_path,
+            _SNAPSHOT_ARTIFACT_PATHS,
+        )
         return LocalWorkspacePreparation(
             prepared=prepared,
             workspace_path=resolved_workspace_path,
-            written_artifact_paths=self._existing_paths(
-                resolved_workspace_path,
-                _SNAPSHOT_ARTIFACT_PATHS,
-            ),
+            written_artifact_paths=written_paths,
             diagnostics=prepared.diagnostics,
+            summary=LocalWorkspacePreparationSummary(
+                workspace_path=resolved_workspace_path,
+                written_artifact_paths=written_paths,
+                llm_safe_approved=prepared.safety.approved,
+                blocker_count=len(prepared.safety.blockers),
+                warning_count=len(prepared.safety.warnings),
+                diagnostic_count=len(prepared.diagnostics),
+            ),
         )
 
     def apply_and_save_statement_replacements(
@@ -151,6 +218,13 @@ class LocalWorkspaceApplication:
                 workspace_path=workspace_path,
                 output_path=None,
                 written_artifact_paths=(),
+                summary=LocalStatementReplacementSummary(
+                    workspace_path=workspace_path,
+                    output_path=None,
+                    written_artifact_paths=(),
+                    persisted=False,
+                    replacement=replacement.summary,
+                ),
             )
         resolved_output_path = output_path or workspace_path / "llm_response_obfuscated.sql"
         if resolved_output_path == workspace_path / "obfuscated.sql":
@@ -160,14 +234,22 @@ class LocalWorkspaceApplication:
             workspace_path=workspace_path,
             report_payload=replacement.report,
         )
+        written_paths = self._existing_explicit_paths(
+            resolved_output_path,
+            workspace_path / "reports" / "llm_edit_application_report.schema.json",
+            workspace_path / "reports" / "llm_edit_application_report.json",
+        )
         return LocalStatementReplacement(
             replacement=replacement,
             workspace_path=workspace_path,
             output_path=resolved_output_path,
-            written_artifact_paths=self._existing_explicit_paths(
-                resolved_output_path,
-                workspace_path / "reports" / "llm_edit_application_report.schema.json",
-                workspace_path / "reports" / "llm_edit_application_report.json",
+            written_artifact_paths=written_paths,
+            summary=LocalStatementReplacementSummary(
+                workspace_path=workspace_path,
+                output_path=resolved_output_path,
+                written_artifact_paths=written_paths,
+                persisted=True,
+                replacement=replacement.summary,
             ),
         )
 
@@ -184,6 +266,15 @@ class LocalWorkspaceApplication:
             output_path=None,
             written_artifact_paths=(),
             diagnostics=deobfuscation.diagnostics,
+            summary=LocalDeobfuscationSummary(
+                workspace_path=workspace_path,
+                output_path=None,
+                written_artifact_paths=(),
+                persisted=False,
+                deobfuscation=deobfuscation.summary,
+                has_unresolved=deobfuscation.safety.has_unresolved,
+                has_low_confidence=deobfuscation.safety.has_low_confidence,
+            ),
         )
 
     def deobfuscate_and_save(
@@ -289,12 +380,25 @@ class LocalWorkspaceApplication:
                         resolved_workspace_path / "reports" / "roundtrip_diff.txt"
                     )
                 )
+        written_artifact_paths = _deduplicate_paths(written_paths)
         return LocalRoundtrip(
             prepared=prepared,
             roundtrip=roundtrip,
             workspace_path=resolved_workspace_path,
-            written_artifact_paths=_deduplicate_paths(written_paths),
+            written_artifact_paths=written_artifact_paths,
             diagnostics=roundtrip.diagnostics if roundtrip is not None else prepared.diagnostics,
+            summary=LocalRoundtripSummary(
+                workspace_path=resolved_workspace_path,
+                written_artifact_paths=written_artifact_paths,
+                completed=roundtrip is not None,
+                exact_match=roundtrip.exact_match if roundtrip is not None else None,
+                normalized_exact_match=(
+                    roundtrip.normalized_exact_match if roundtrip is not None else None
+                ),
+                deobfuscation=(
+                    roundtrip.deobfuscation.summary if roundtrip is not None else None
+                ),
+            ),
         )
 
     def translate_and_save_artifacts(
@@ -329,6 +433,22 @@ class LocalWorkspaceApplication:
             workspace_path=workspace_path,
             written_artifact_paths=written_paths,
             diagnostics=translation.diagnostics,
+            summary=LocalTranslationSummary(
+                workspace_path=workspace_path,
+                written_artifact_paths=written_paths,
+                succeeded=translation.succeeded,
+                translated_sql_persisted=(
+                    workspace_path is not None
+                    and translation.succeeded
+                    and persist_translated_sql
+                    and (workspace_path / "translated.sql").exists()
+                ),
+                translation_report_persisted=(
+                    workspace_path is not None
+                    and (workspace_path / "reports" / "translation_report.json").exists()
+                ),
+                translation=translation.summary,
+            ),
         )
 
     def _save_deobfuscation(
@@ -349,19 +469,29 @@ class LocalWorkspaceApplication:
             workspace_path=workspace_path,
             report_payload=deobfuscation.llm_workflow_report,
         )
+        written_paths = self._existing_explicit_paths(
+            resolved_output_path,
+            workspace_path / "deobfuscated.sql",
+            workspace_path / "reports" / "deobfuscation_report.json",
+            workspace_path / "reports" / "coverage_report.txt",
+            workspace_path / "reports" / "llm_workflow_report.schema.json",
+            workspace_path / "reports" / "llm_workflow_report.json",
+        )
         return LocalDeobfuscation(
             deobfuscation=deobfuscation,
             workspace_path=workspace_path,
             output_path=resolved_output_path,
-            written_artifact_paths=self._existing_explicit_paths(
-                resolved_output_path,
-                workspace_path / "deobfuscated.sql",
-                workspace_path / "reports" / "deobfuscation_report.json",
-                workspace_path / "reports" / "coverage_report.txt",
-                workspace_path / "reports" / "llm_workflow_report.schema.json",
-                workspace_path / "reports" / "llm_workflow_report.json",
-            ),
+            written_artifact_paths=written_paths,
             diagnostics=deobfuscation.diagnostics,
+            summary=LocalDeobfuscationSummary(
+                workspace_path=workspace_path,
+                output_path=resolved_output_path,
+                written_artifact_paths=written_paths,
+                persisted=True,
+                deobfuscation=deobfuscation.summary,
+                has_unresolved=deobfuscation.safety.has_unresolved,
+                has_low_confidence=deobfuscation.safety.has_low_confidence,
+            ),
         )
 
     def _write_text(self, path: Path, content: str) -> None:

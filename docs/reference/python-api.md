@@ -183,6 +183,38 @@ to `LocalWorkspaceStore`. New local persistence behavior should use
 A future web host can provide tenant-scoped persistence without changing the host-neutral
 workflow operations.
 
+## Run Local Workflow Operations
+
+```python
+from pathlib import Path
+
+from sql_obfuscator.local_application import LocalWorkspaceApplication
+from sql_obfuscator.workflow import ObfuscationOptions, TranslationOptions
+
+app = LocalWorkspaceApplication()
+prepared = app.prepare_and_save_workspace(
+    sql_text,
+    input_path=Path("script.sql"),
+    options=ObfuscationOptions(seed=42),
+)
+print(prepared.summary.workspace_path)
+print(prepared.summary.written_artifact_paths)
+
+translated = app.translate_and_save_artifacts(
+    sql_text,
+    options=TranslationOptions(source_dialect="tsql", target_dialect="hive"),
+    workspace_path=prepared.summary.workspace_path,
+    persist_translated_sql=True,
+)
+print(translated.summary.translation.target_dialect)
+print(translated.summary.translated_sql_persisted)
+```
+
+Local application methods return workflow results plus a `summary` object with structured
+operation facts such as workspace path, output path, written artifacts, persistence status,
+and typed workflow counts. CLI handlers render those summaries as text; desktop and web
+hosts can render the same facts without reading report dictionaries.
+
 ## Inspect A Local Workspace
 
 ```python
