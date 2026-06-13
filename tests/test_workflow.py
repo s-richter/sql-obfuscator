@@ -117,6 +117,77 @@ def test_prepare_workspace_llm_safe_passes_when_custom_qualifiers_are_obfuscated
     assert prepared.safety.blockers == ()
 
 
+def test_prepare_workspace_obfuscates_qualified_function_schema_and_restores_it():
+    prepared = prepare_workspace(
+        "SELECT sales.NormalizeEmail(CustomerEmail) FROM sales.Customers;",
+        input_name="input.sql",
+        options=ObfuscationOptions(seed=42, obfuscate_qualifiers=True),
+    )
+
+    obfuscated_sql = prepared.snapshot.obfuscated_sql
+    assert "sales." not in obfuscated_sql
+    assert "NormalizeEmail" in obfuscated_sql
+    assert any(
+        occurrence["kind"] == "schema_qualifier"
+        and occurrence["role"] == "function_schema_qualifier"
+        for entry in prepared.snapshot.mapping_payload["entries"]
+        for occurrence in entry["occurrences"]
+    )
+
+    result = analyze_deobfuscation(prepared.snapshot, obfuscated_sql)
+
+    assert "sales.NormalizeEmail" in result.deobfuscated_sql
+    assert result.safety.has_unresolved is False
+
+
+def test_prepare_workspace_llm_safe_blocks_function_name_after_function_qualifier_obfuscation():
+    with pytest.raises(LlmSafetyError) as exc_info:
+        prepare_workspace(
+            "SELECT sales.NormalizeEmail(CustomerEmail) FROM sales.Customers;",
+            input_name="input.sql",
+            options=ObfuscationOptions(llm_safe=True, obfuscate_qualifiers=True),
+        )
+
+    prepared = exc_info.value.prepared
+    assert "sales." not in prepared.snapshot.obfuscated_sql
+    assert "NormalizeEmail" in prepared.snapshot.obfuscated_sql
+    assert prepared.safety.approved is False
+    assert "user_defined_functions" in prepared.snapshot.privacy_summary["blocking_identifier_classes"]
+    assert "custom_schema_qualifiers" not in prepared.snapshot.privacy_summary["blocking_identifier_classes"]
+
+
+def test_prepare_workspace_preserves_common_qualified_function_schema():
+    prepared = prepare_workspace(
+        "SELECT dbo.NormalizeEmail(CustomerEmail) FROM dbo.Customers;",
+        input_name="input.sql",
+        options=ObfuscationOptions(obfuscate_qualifiers=True),
+    )
+
+    assert "dbo.NormalizeEmail" in prepared.snapshot.obfuscated_sql
+    assert "common_schema_qualifiers" in prepared.snapshot.privacy_summary["warning_identifier_classes"]
+    assert "custom_schema_qualifiers" not in prepared.snapshot.privacy_summary["blocking_identifier_classes"]
+
+
+def test_prepare_workspace_obfuscates_hive_qualified_function_schema():
+    prepared = prepare_workspace(
+        "SELECT sales.normalize_email(customer_email) FROM sales.customers;",
+        input_name="input.sql",
+        options=ObfuscationOptions(
+            dialect="hive",
+            seed=42,
+            obfuscate_qualifiers=True,
+        ),
+    )
+
+    assert "sales." not in prepared.snapshot.obfuscated_sql
+    assert "normalize_email" in prepared.snapshot.obfuscated_sql.lower()
+
+    result = analyze_deobfuscation(prepared.snapshot, prepared.snapshot.obfuscated_sql)
+
+    assert "sales.normalize_email" in result.deobfuscated_sql.lower()
+    assert result.safety.has_unresolved is False
+
+
 def test_prepare_workspace_returns_structured_sqlglot_warning_diagnostics(capsys):
     prepared = prepare_workspace(
         "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",

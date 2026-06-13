@@ -85,7 +85,7 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--obfuscate-qualifiers",
         action="store_true",
-        help="Obfuscate custom schema and catalog/database qualifiers on table and column references",
+        help="Obfuscate custom schema and catalog/database qualifiers on supported references",
     )
     parser.add_argument(
         "--stdout-only",

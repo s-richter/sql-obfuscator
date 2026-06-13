@@ -10,6 +10,7 @@ from .identifier_occurrences import (
     column_identifier_occurrences,
     identifier_raw,
     node_context,
+    qualified_function_schema_occurrence,
     qualifier_identifier_occurrences,
     table_identifier_occurrence,
 )
@@ -268,6 +269,15 @@ def transform_statements(
                         statement_index=statement_index,
                     )
                 return renamed
+            if isinstance(node, exp.Dot) and obfuscate_qualifiers:
+                return _rename_qualified_function_schema(
+                    node,
+                    registry,
+                    profile,
+                    dialect=dialect,
+                    batch_index=batch_index,
+                    statement_index=statement_index,
+                )
             if isinstance(node, exp.CTE):
                 return _rename_cte(
                     node,
@@ -314,6 +324,36 @@ def transform_statements(
         transformed.append(statement.transform(_transform, copy=True))
 
     return transformed
+
+
+def _rename_qualified_function_schema(
+    node: exp.Dot,
+    registry: IdentifierRegistry,
+    profile: DialectProfile,
+    *,
+    dialect: str,
+    batch_index: int,
+    statement_index: int,
+) -> exp.Dot:
+    occurrence = qualified_function_schema_occurrence(
+        node,
+        profile=profile,
+        dialect=dialect,
+        batch_index=batch_index,
+        statement_index=statement_index,
+    )
+    if occurrence is None:
+        return node
+    occurrence.identifier.set(
+        "this",
+        registry.get_or_create(
+            occurrence.lexeme,
+            kind=occurrence.kind,
+            role=occurrence.role,
+            **occurrence.context.as_registry_kwargs(),
+        ),
+    )
+    return node
 
 
 def _rename_qualifiers(

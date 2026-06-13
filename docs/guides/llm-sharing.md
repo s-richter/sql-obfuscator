@@ -32,7 +32,7 @@ comment removal, and validation:
 | Option | Purpose |
 |---|---|
 | `obfuscate` | Replaces supported identifiers with generated names |
-| `--obfuscate-qualifiers` | Obfuscates custom schema qualifiers and catalog/database qualifiers on table and column references |
+| `--obfuscate-qualifiers` | Obfuscates custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls |
 | `--redaction-mode irreversible` | Uses one-way redaction so original literal values are not stored for restoration |
 | `--redact-literals` | Replaces string and numeric values |
 | `--strip-comments` | Removes SQL comments |
@@ -60,8 +60,8 @@ The normal obfuscation pass replaces:
 - insert target column lists
 
 `--obfuscate-qualifiers` can also replace custom schema qualifiers and catalog/database
-qualifiers on table and column references. Optional redaction can remove comments and
-sanitize literal values.
+qualifiers on table references, column references, and qualified function calls. Optional
+redaction can remove comments and sanitize literal values.
 
 ## What Can Remain Visible
 
@@ -69,7 +69,6 @@ Some SQL text is intentionally not renamed by the normal identifier pass:
 
 - variables such as `@UserId` and `@@ROWCOUNT`
 - common schema qualifiers such as `dbo`, `sys`, `information_schema`, or Hive `default`
-- schema qualifiers on qualified function calls
 - function invocation names
 - SQL keywords
 - boolean and `NULL` tokens
@@ -96,8 +95,8 @@ The command rejects external-sharing approval when it detects:
 | Privacy-audit parse failure | The generated SQL could not be fully checked |
 | Local variables such as `@UserId` | The original variable name remains visible |
 | User-defined or unknown function names | The function name may reveal system-specific information |
-| Custom schema qualifiers such as `sales` | The schema name remains visible; use `--obfuscate-qualifiers` for table and column references |
-| Catalog qualifiers | A database or catalog name remains visible; use `--obfuscate-qualifiers` for table and column references |
+| Custom schema qualifiers such as `sales` | The schema name remains visible; use `--obfuscate-qualifiers` for supported qualifier positions |
+| Catalog qualifiers | A database or catalog name remains visible; use `--obfuscate-qualifiers` for supported qualifier positions |
 
 The audit can also print warnings that do not block approval:
 

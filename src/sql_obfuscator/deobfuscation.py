@@ -13,6 +13,7 @@ from .errors import ParseScriptError, WorkspaceError
 from .identifier_occurrences import (
     column_identifier_occurrences,
     node_context,
+    qualified_function_schema_occurrence,
     qualifier_identifier_occurrences,
     table_identifier_occurrence,
 )
@@ -618,6 +619,32 @@ def _transform_statement(
                 batch_index=resolution_batch_index,
                 statement_index=resolution_statement_index,
             ):
+                _resolve_and_apply(
+                    resolver,
+                    report=report,
+                    node=node,
+                    identifier=qualifier_occurrence.identifier,
+                    obfuscated_lexeme=qualifier_occurrence.identifier.name,
+                    kind=qualifier_occurrence.kind,
+                    role=qualifier_occurrence.role,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
+                    profile=profile,
+                )
+            return node
+
+        if isinstance(node, exp.Dot):
+            qualifier_occurrence = qualified_function_schema_occurrence(
+                node,
+                profile=profile,
+                dialect=profile.sqlglot_dialect,
+                batch_index=resolution_batch_index,
+                statement_index=resolution_statement_index,
+            )
+            if qualifier_occurrence is not None:
                 _resolve_and_apply(
                     resolver,
                     report=report,

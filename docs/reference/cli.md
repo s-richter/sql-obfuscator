@@ -52,7 +52,7 @@ Use `-` instead of a filename to read SQL from stdin.
 | `--redaction-mode <none|irreversible|reversible>` | Choose how literal and comment sanitization works. Defaults to `none`. |
 | `--redaction-policy <all|strings-only|sensitive>` | Choose which literal values are sanitized. Defaults to `all`. |
 | `--redaction-sensitive-columns <csv>` | Comma-separated columns used by the `sensitive` policy. |
-| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table and column references. |
+| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls. |
 | `--stdout-only` | Print SQL without writing the sibling output file. The workspace is still written. |
 | `--output-dir <dir>` | Write the generated SQL file into a specific directory. File input only. |
 | `--llm-safe` / `--no-llm-safe` | Stop when known higher-risk content remains in SQL intended for external sharing. Disabled by default. |
