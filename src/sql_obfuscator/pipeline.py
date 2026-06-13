@@ -66,6 +66,7 @@ def _process_batch(
     batch_number: int = 1,
     total_batches: int = 1,
     statement_start_index: int = 1,
+    obfuscate_qualifiers: bool = False,
 ) -> _ProcessedBatch:
     if not batch_sql.strip():
         return _ProcessedBatch(
@@ -91,6 +92,7 @@ def _process_batch(
         batch_sql=batch_sql,
         dialect=dialect,
         profile=profile,
+        obfuscate_qualifiers=obfuscate_qualifiers,
     )
     statement_sqls: list[str] = []
     statement_anchors: list[dict[str, Any]] = []
@@ -151,6 +153,7 @@ def obfuscate_sql(
     redaction_policy: str = "all",
     sensitive_columns: set[str] | None = None,
     identifier_vocabulary: IdentifierVocabulary | None = None,
+    obfuscate_qualifiers: bool = False,
 ) -> str:
     result = obfuscate_sql_with_metadata(
         script,
@@ -164,6 +167,7 @@ def obfuscate_sql(
         redaction_policy=redaction_policy,
         sensitive_columns=sensitive_columns,
         identifier_vocabulary=identifier_vocabulary,
+        obfuscate_qualifiers=obfuscate_qualifiers,
     )
     return result.output_sql
 
@@ -181,6 +185,7 @@ def obfuscate_sql_with_metadata(
     redaction_policy: str = "all",
     sensitive_columns: set[str] | None = None,
     identifier_vocabulary: IdentifierVocabulary | None = None,
+    obfuscate_qualifiers: bool = False,
 ) -> ObfuscationResult:
     if strict_go:
         _validate_strict_go(script, dialect=dialect)
@@ -217,6 +222,7 @@ def obfuscate_sql_with_metadata(
             batch_number=batch_idx,
             total_batches=len(batches),
             statement_start_index=next_statement_index,
+            obfuscate_qualifiers=obfuscate_qualifiers,
         )
         transformed_batches.append(processed_batch.output_sql)
         statement_anchors.extend(processed_batch.statement_anchors)
@@ -235,6 +241,7 @@ def obfuscate_sql_with_metadata(
         "strip_comments": strip_comments,
         "redaction_mode": redaction_mode,
         "redaction_policy": redaction_policy,
+        "obfuscate_qualifiers": obfuscate_qualifiers,
         "sensitive_columns": sorted(sensitive_columns or []),
         "batch_count": len(batches),
         "statement_count": total_statements,
@@ -247,6 +254,14 @@ def obfuscate_sql_with_metadata(
         dialect=dialect,
         statement_count=total_statements,
         fallback_preserved_statement_count=fallback_preserved_statement_count,
+        obfuscated_schema_qualifiers=_mapped_obfuscated_lexemes(
+            mapping_payload,
+            kind="schema_qualifier",
+        ),
+        obfuscated_catalog_qualifiers=_mapped_obfuscated_lexemes(
+            mapping_payload,
+            kind="catalog_qualifier",
+        ),
     )
     identifier_surface = privacy_summary.get("identifier_surface", {})
     local_variables = identifier_surface.get("local_variables", {})
@@ -283,3 +298,19 @@ def obfuscate_sql_with_metadata(
         obfuscation_report=obfuscation_report,
         privacy_summary=privacy_summary,
     )
+
+
+def _mapped_obfuscated_lexemes(mapping_payload: dict[str, Any], *, kind: str) -> set[str]:
+    values: set[str] = set()
+    for entry in mapping_payload.get("entries", []):
+        if not isinstance(entry, dict):
+            continue
+        occurrences = entry.get("occurrences", [])
+        if not isinstance(occurrences, list):
+            continue
+        if not any(isinstance(occurrence, dict) and occurrence.get("kind") == kind for occurrence in occurrences):
+            continue
+        obfuscated = entry.get("obfuscated_lexeme")
+        if isinstance(obfuscated, str):
+            values.add(obfuscated)
+    return values

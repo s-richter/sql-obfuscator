@@ -10,6 +10,7 @@ For a privacy-oriented copy that does not need its original literal values resto
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments
@@ -25,11 +26,14 @@ and other metadata intended to remain local.
 
 ## What The Command Does
 
-The quick-start command combines four separate behaviors:
+The quick-start command combines identifier replacement, qualifier obfuscation, redaction,
+comment removal, and validation:
 
 | Option | Purpose |
 |---|---|
 | `obfuscate` | Replaces supported identifiers with generated names |
+| `--obfuscate-qualifiers` | Obfuscates custom schema qualifiers and catalog/database qualifiers on table and column references |
+| `--redaction-mode irreversible` | Uses one-way redaction so original literal values are not stored for restoration |
 | `--redact-literals` | Replaces string and numeric values |
 | `--strip-comments` | Removes SQL comments |
 | `--llm-safe` | Stops with an error when known higher-risk visible content remains |
@@ -55,15 +59,17 @@ The normal obfuscation pass replaces:
 - column definitions
 - insert target column lists
 
-Optional redaction can also remove comments and sanitize literal values.
+`--obfuscate-qualifiers` can also replace custom schema qualifiers and catalog/database
+qualifiers on table and column references. Optional redaction can remove comments and
+sanitize literal values.
 
 ## What Can Remain Visible
 
 Some SQL text is intentionally not renamed by the normal identifier pass:
 
 - variables such as `@UserId` and `@@ROWCOUNT`
-- schema qualifiers such as `dbo` or `sales`
-- database or catalog qualifiers
+- common schema qualifiers such as `dbo`, `sys`, `information_schema`, or Hive `default`
+- schema qualifiers on qualified function calls
 - function invocation names
 - SQL keywords
 - boolean and `NULL` tokens
@@ -74,9 +80,13 @@ sharing it, even when `--llm-safe` succeeds.
 
 ## What `--llm-safe` Checks
 
-`--llm-safe` enables a stop-on-risk behavior. This is sometimes called **fail-closed**
-behavior: the command stops with an error instead of producing output that could be mistaken
-for approved external-sharing output.
+`--llm-safe` makes the command stop when a safety check fails. This prevents a failed check
+from being mistaken for approved external-sharing output. This stop-on-failure behavior is
+sometimes called **fail-closed** behavior.
+
+A **fallback-preserved statement** is SQL copied through without full obfuscation because
+the parser could not reliably transform it. Selected procedural T-SQL constructs can use
+this path, including some `WAITFOR`, cursor, `WHILE`, and `IF` statements.
 
 The command rejects external-sharing approval when it detects:
 
@@ -86,12 +96,8 @@ The command rejects external-sharing approval when it detects:
 | Privacy-audit parse failure | The generated SQL could not be fully checked |
 | Local variables such as `@UserId` | The original variable name remains visible |
 | User-defined or unknown function names | The function name may reveal system-specific information |
-| Custom schema qualifiers such as `sales` | The schema name remains visible |
-| Catalog qualifiers | A database or catalog name remains visible |
-
-A **fallback-preserved statement** is SQL copied through without full obfuscation because the
-parser could not reliably transform it. Selected procedural T-SQL constructs can use this
-path, including some `WAITFOR`, cursor, `WHILE`, and `IF` statements.
+| Custom schema qualifiers such as `sales` | The schema name remains visible; use `--obfuscate-qualifiers` for table and column references |
+| Catalog qualifiers | A database or catalog name remains visible; use `--obfuscate-qualifiers` for table and column references |
 
 The audit can also print warnings that do not block approval:
 
@@ -122,8 +128,8 @@ Common responses are:
 3. Review the generated SQL manually and decide whether a manual-review workflow is
    acceptable.
 
-The documentation calls the third option **expert mode**. It means you deliberately accept
-larger edits, more manual review, or content that the tool could not approve automatically.
+The third option is an **expert mode** workflow. It means you deliberately accept larger
+edits, more manual review, or content that the tool could not approve automatically.
 
 ## Choose A Redaction Mode
 
@@ -138,6 +144,7 @@ larger edits, more manual review, or content that the tool could not approve aut
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments
@@ -151,6 +158,7 @@ stored in redaction metadata and cannot be restored by `deobfuscate`.
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode reversible \
   --redact-literals \
   --strip-comments
@@ -181,6 +189,7 @@ Example selective policy:
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments \
@@ -194,7 +203,8 @@ information. Review the output before sharing it.
 ## Ask For Small Edits
 
 The recommended edit workflow asks the LLM to change specific statements instead of
-rewriting the entire script. The documentation calls this a **bounded edit**.
+rewriting the entire script. This is a **bounded edit**: the requested change stays inside
+known statement IDs and leaves unrelated statements untouched.
 
 Small edits reduce the risk that the LLM changes generated identifiers, aliases,
 placeholders, statement order, or table relationships in ways that make restoration
@@ -296,7 +306,7 @@ Some changes are poor fits for automatic restoration:
 - changing CTE structure substantially
 - renaming generated aliases
 - removing reversible-redaction placeholders
-- rewriting parser-fallback statements
+- rewriting statements that were copied through without full obfuscation
 
 Use a manual-review workflow for these tasks. Keep the original workspace local, inspect the
 LLM output carefully, and run `deobfuscate --dry-run` before writing restored SQL.

@@ -6,6 +6,7 @@ from sqlglot import exp
 from sqlglot.expressions import Expression
 
 from .dialects_base import DialectProfile
+from .qualifiers import is_common_schema_qualifier
 
 
 @dataclass(frozen=True)
@@ -211,4 +212,46 @@ def column_identifier_occurrences(
                 context=context,
             )
         )
+    return tuple(occurrences)
+
+
+def qualifier_identifier_occurrences(
+    node: exp.Table | exp.Column,
+    *,
+    profile: DialectProfile,
+    dialect: str,
+    batch_index: int,
+    statement_index: int,
+) -> tuple[IdentifierOccurrence, ...]:
+    context = node_context(node, batch_index=batch_index, statement_index=statement_index)
+    occurrences: list[IdentifierOccurrence] = []
+
+    catalog = node.args.get("catalog")
+    if isinstance(catalog, exp.Identifier):
+        occurrences.append(
+            IdentifierOccurrence(
+                node=node,
+                identifier=catalog,
+                lexeme=identifier_raw(catalog, profile=profile) or catalog.name,
+                kind="catalog_qualifier",
+                role=f"{type(node).__name__.lower()}_catalog_qualifier",
+                context=context,
+            )
+        )
+
+    schema = node.args.get("db")
+    if isinstance(schema, exp.Identifier):
+        lexeme = identifier_raw(schema, profile=profile) or schema.name
+        if not is_common_schema_qualifier(lexeme, dialect=dialect):
+            occurrences.append(
+                IdentifierOccurrence(
+                    node=node,
+                    identifier=schema,
+                    lexeme=lexeme,
+                    kind="schema_qualifier",
+                    role=f"{type(node).__name__.lower()}_schema_qualifier",
+                    context=context,
+                )
+            )
+
     return tuple(occurrences)

@@ -118,6 +118,7 @@ It summarizes:
 - transformed and fallback-preserved statement counts
 - visible privacy warning and blocker counts
 - literal redaction counts
+- visible custom schema, common schema, and catalog/database qualifier counts
 - later unresolved, ambiguous, and low-confidence restoration counts
 
 ### `llm_edit_application_report.json`
@@ -163,9 +164,9 @@ stmt_0001
 stmt_0002
 ```
 
-The documentation calls these **statement anchors**. They help the tool associate edited SQL
-with the original obfuscated statements. Generated `llm_instructions.md` lists the IDs and
-asks an external LLM to return targeted statement replacements.
+These statement IDs help the tool associate edited SQL with the original obfuscated
+statements. Generated `llm_instructions.md` lists the IDs and asks an external LLM to return
+targeted statement replacements.
 
 Prefer `apply-llm-edits` over manual full-file editing. It uses statement IDs to preserve
 untouched statements exactly.
@@ -197,7 +198,7 @@ This validates integrity and prints:
 - run settings
 - batch, statement, and mapping counts
 - tracked-file count
-- artifact and report availability
+- generated-file and report availability
 - privacy summary state
 
 ## Related Documents

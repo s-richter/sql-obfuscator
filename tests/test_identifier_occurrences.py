@@ -1,8 +1,11 @@
+from collections import Counter
+
 from sqlglot import exp
 
 from sql_obfuscator.dialects_factory import get_dialect_profile
 from sql_obfuscator.identifier_occurrences import (
     column_identifier_occurrences,
+    qualifier_identifier_occurrences,
     table_identifier_occurrence,
 )
 from sql_obfuscator.sqlglot_compat import parse_sql
@@ -67,3 +70,36 @@ def test_update_alias_target_occurrence_is_classified_as_alias():
     assert occurrence.kind == "alias"
     assert occurrence.role == "update_target_alias"
     assert occurrence.context.statement_kind == "update"
+
+
+def test_table_and_column_qualifier_occurrences_skip_common_schemas():
+    profile = get_dialect_profile("tsql")
+    statement = parse_sql(
+        "SELECT sales.Orders.CustomerId FROM CustomerDW.sales.Orders JOIN dbo.Users u ON u.UserId = sales.Orders.UserId",
+        dialect="tsql",
+    )[0]
+
+    qualifier_occurrences = [
+        occurrence
+        for node in statement.walk()
+        if isinstance(node, (exp.Table, exp.Column))
+        for occurrence in qualifier_identifier_occurrences(
+            node,
+            profile=profile,
+            dialect="tsql",
+            batch_index=1,
+            statement_index=1,
+        )
+    ]
+
+    assert Counter(
+        (occurrence.kind, occurrence.role, occurrence.lexeme)
+        for occurrence in qualifier_occurrences
+    ) == Counter(
+        [
+            ("catalog_qualifier", "table_catalog_qualifier", "CustomerDW"),
+            ("schema_qualifier", "table_schema_qualifier", "sales"),
+            ("schema_qualifier", "column_schema_qualifier", "sales"),
+            ("schema_qualifier", "column_schema_qualifier", "sales"),
+        ]
+    )

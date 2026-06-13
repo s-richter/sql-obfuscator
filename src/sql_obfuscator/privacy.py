@@ -7,14 +7,10 @@ from sqlglot import exp
 from sqlglot.errors import ParseError
 
 from .dialects_factory import get_dialect_profile
+from .qualifiers import is_common_schema_qualifier
 from .sqlglot_compat import parse_sql
 
 PRIVACY_SUMMARY_SCHEMA_VERSION = 1
-
-_COMMON_SAFE_SCHEMAS_BY_DIALECT = {
-    "tsql": {"dbo", "sys", "information_schema"},
-    "hive": {"default", "information_schema"},
-}
 
 
 @dataclass
@@ -68,6 +64,8 @@ def build_privacy_summary(
     dialect: str,
     statement_count: int,
     fallback_preserved_statement_count: int,
+    obfuscated_schema_qualifiers: set[str] | None = None,
+    obfuscated_catalog_qualifiers: set[str] | None = None,
 ) -> dict[str, Any]:
     try:
         profile = get_dialect_profile(dialect)
@@ -99,13 +97,25 @@ def build_privacy_summary(
             "analysis_error": str(exc),
         }
 
+    ignored_schema_qualifiers = {
+        _normalize_visible_identifier(value) for value in obfuscated_schema_qualifiers or set()
+    }
+    ignored_catalog_qualifiers = {
+        _normalize_visible_identifier(value) for value in obfuscated_catalog_qualifiers or set()
+    }
     surface = _PrivacySurface()
     analyzed_statement_count = 0
     for statement in statements:
         if isinstance(statement.meta.get("raw_sql"), str):
             continue
         analyzed_statement_count += 1
-        _collect_statement_surface(statement=statement, dialect=dialect, surface=surface)
+        _collect_statement_surface(
+            statement=statement,
+            dialect=dialect,
+            surface=surface,
+            ignored_schema_qualifiers=ignored_schema_qualifiers,
+            ignored_catalog_qualifiers=ignored_catalog_qualifiers,
+        )
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -215,7 +225,14 @@ def build_privacy_summary(
     }
 
 
-def _collect_statement_surface(*, statement: exp.Expression, dialect: str, surface: _PrivacySurface) -> None:
+def _collect_statement_surface(
+    *,
+    statement: exp.Expression,
+    dialect: str,
+    surface: _PrivacySurface,
+    ignored_schema_qualifiers: set[str],
+    ignored_catalog_qualifiers: set[str],
+) -> None:
     for node in statement.walk():
         if isinstance(node, exp.Parameter) and not isinstance(node.parent, exp.Parameter):
             value = node.sql(dialect=dialect)
@@ -235,6 +252,7 @@ def _collect_statement_surface(*, statement: exp.Expression, dialect: str, surfa
                     dialect=dialect,
                     common_bucket=surface.common_schema_qualifiers,
                     custom_bucket=surface.custom_schema_qualifiers,
+                    ignored_schema_qualifiers=ignored_schema_qualifiers,
                 )
             surface.user_defined_functions.add(function_name)
             continue
@@ -247,10 +265,13 @@ def _collect_statement_surface(*, statement: exp.Expression, dialect: str, surfa
                     dialect=dialect,
                     common_bucket=surface.common_schema_qualifiers,
                     custom_bucket=surface.custom_schema_qualifiers,
+                    ignored_schema_qualifiers=ignored_schema_qualifiers,
                 )
             catalog_identifier = node.args.get("catalog")
             if isinstance(catalog_identifier, exp.Identifier):
-                surface.catalog_qualifiers.add(catalog_identifier.sql(dialect=dialect))
+                value = catalog_identifier.sql(dialect=dialect)
+                if _normalize_visible_identifier(value) not in ignored_catalog_qualifiers:
+                    surface.catalog_qualifiers.add(value)
 
 
 def _qualified_function_schema(node: exp.Anonymous) -> str | None:
@@ -269,14 +290,21 @@ def _record_schema_value(
     dialect: str,
     common_bucket: _SurfaceBucket,
     custom_bucket: _SurfaceBucket,
+    ignored_schema_qualifiers: set[str],
 ) -> None:
     normalized = value.strip()
     if not normalized:
         return
-    if normalized.lower() in _COMMON_SAFE_SCHEMAS_BY_DIALECT.get(dialect.lower(), set()):
+    if _normalize_visible_identifier(normalized) in ignored_schema_qualifiers:
+        return
+    if is_common_schema_qualifier(normalized, dialect=dialect):
         common_bucket.add(normalized)
         return
     custom_bucket.add(normalized)
+
+
+def _normalize_visible_identifier(value: str) -> str:
+    return value.strip().strip("[]`\"").lower()
 
 
 def _format_surface_message(*, count: int, singular: str, plural: str, examples: list[str]) -> str:

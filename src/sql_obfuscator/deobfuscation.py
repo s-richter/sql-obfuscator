@@ -13,6 +13,7 @@ from .errors import ParseScriptError, WorkspaceError
 from .identifier_occurrences import (
     column_identifier_occurrences,
     node_context,
+    qualifier_identifier_occurrences,
     table_identifier_occurrence,
 )
 from .sqlglot_compat import emit_sql, join_emitted_statements, parse_sql
@@ -564,6 +565,28 @@ def _transform_statement(
                 statement_anchor=statement_anchor,
                 profile=profile,
             )
+            for qualifier_occurrence in qualifier_identifier_occurrences(
+                node,
+                profile=profile,
+                dialect=profile.sqlglot_dialect,
+                batch_index=resolution_batch_index,
+                statement_index=resolution_statement_index,
+            ):
+                _resolve_and_apply(
+                    resolver,
+                    report=report,
+                    node=node,
+                    identifier=qualifier_occurrence.identifier,
+                    obfuscated_lexeme=qualifier_occurrence.identifier.name,
+                    kind=qualifier_occurrence.kind,
+                    role=qualifier_occurrence.role,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
+                    profile=profile,
+                )
             return node
 
         if isinstance(node, exp.Column):
@@ -581,6 +604,28 @@ def _transform_statement(
                     obfuscated_lexeme=occurrence.identifier.name,
                     kind=occurrence.kind,
                     role=occurrence.role,
+                    current_batch_index=current_batch_index,
+                    current_statement_index=current_statement_index,
+                    resolution_batch_index=resolution_batch_index,
+                    resolution_statement_index=resolution_statement_index,
+                    statement_anchor=statement_anchor,
+                    profile=profile,
+                )
+            for qualifier_occurrence in qualifier_identifier_occurrences(
+                node,
+                profile=profile,
+                dialect=profile.sqlglot_dialect,
+                batch_index=resolution_batch_index,
+                statement_index=resolution_statement_index,
+            ):
+                _resolve_and_apply(
+                    resolver,
+                    report=report,
+                    node=node,
+                    identifier=qualifier_occurrence.identifier,
+                    obfuscated_lexeme=qualifier_occurrence.identifier.name,
+                    kind=qualifier_occurrence.kind,
+                    role=qualifier_occurrence.role,
                     current_batch_index=current_batch_index,
                     current_statement_index=current_statement_index,
                     resolution_batch_index=resolution_batch_index,

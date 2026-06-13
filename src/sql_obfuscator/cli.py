@@ -83,6 +83,11 @@ def _add_common_obfuscation_args(parser: argparse.ArgumentParser) -> None:
         help="Comma-separated column names used when --redaction-policy sensitive",
     )
     parser.add_argument(
+        "--obfuscate-qualifiers",
+        action="store_true",
+        help="Obfuscate custom schema and catalog/database qualifiers on table and column references",
+    )
+    parser.add_argument(
         "--stdout-only",
         action="store_true",
         help="Print SQL to stdout without writing sibling output files",
@@ -382,6 +387,7 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
                 _parse_sensitive_columns(args.redaction_sensitive_columns)
             ),
             llm_safe=bool(args.llm_safe),
+            obfuscate_qualifiers=bool(args.obfuscate_qualifiers),
         ),
         instructions_text=_read_optional_template(args.instruction_template),
     )
@@ -591,6 +597,7 @@ def _run_roundtrip_command(args: argparse.Namespace) -> int:
                 _parse_sensitive_columns(args.redaction_sensitive_columns)
             ),
             llm_safe=bool(args.llm_safe),
+            obfuscate_qualifiers=bool(args.obfuscate_qualifiers),
         ),
         instructions_text=_read_optional_template(args.instruction_template),
         include_diff_report=bool(args.diff_report),

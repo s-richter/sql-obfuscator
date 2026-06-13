@@ -127,6 +127,7 @@ try:
             redact_literals=True,
             strip_comments=True,
             llm_safe=True,
+            obfuscate_qualifiers=True,
         ),
     )
 except LlmSafetyError as exc:
@@ -135,8 +136,10 @@ except LlmSafetyError as exc:
         print(blocker)
 ```
 
-`llm_safe=True` rejects known higher-risk visible content. It does not enable redaction
-automatically. See [Sharing SQL With an External LLM](../guides/llm-sharing.md).
+`obfuscate_qualifiers=True` obfuscates custom schema qualifiers and catalog/database
+qualifiers on table and column references. `llm_safe=True` rejects known higher-risk visible
+content. It does not enable redaction or qualifier obfuscation automatically. See
+[Sharing SQL With an External LLM](../guides/llm-sharing.md).
 
 ## Save And Load A Workspace
 

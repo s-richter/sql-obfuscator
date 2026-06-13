@@ -77,6 +77,46 @@ def test_prepare_workspace_returns_expert_mode_blockers_and_warnings():
     assert prepared.snapshot.llm_workflow_report["llm_safe_approved"] is False
 
 
+def test_prepare_workspace_obfuscates_custom_qualifiers_and_restores_them():
+    prepared = prepare_workspace(
+        "SELECT sales.Orders.CustomerId FROM CustomerDW.sales.Orders JOIN dbo.Users u ON u.UserId = sales.Orders.UserId;",
+        input_name="input.sql",
+        options=ObfuscationOptions(seed=42, obfuscate_qualifiers=True),
+    )
+
+    obfuscated_sql = prepared.snapshot.obfuscated_sql
+    assert "CustomerDW" not in obfuscated_sql
+    assert "sales" not in obfuscated_sql
+    assert "dbo" in obfuscated_sql
+    assert {entry["occurrences"][0]["kind"] for entry in prepared.snapshot.mapping_payload["entries"]} >= {
+        "schema_qualifier",
+        "catalog_qualifier",
+    }
+    assert prepared.snapshot.context_payload["obfuscate_qualifiers"] is True
+    assert prepared.snapshot.privacy_summary["llm_safe_blocked"] is False
+    assert "custom_schema_qualifiers" not in prepared.snapshot.privacy_summary["blocking_identifier_classes"]
+    assert "catalog_qualifiers" not in prepared.snapshot.privacy_summary["blocking_identifier_classes"]
+
+    result = analyze_deobfuscation(prepared.snapshot, obfuscated_sql)
+
+    assert "CustomerDW.sales.Orders" in result.deobfuscated_sql
+    assert "sales.Orders.CustomerId" in result.deobfuscated_sql
+    assert "dbo.Users" in result.deobfuscated_sql
+    assert result.safety.has_unresolved is False
+    assert result.report["unknown_count"] == 0
+
+
+def test_prepare_workspace_llm_safe_passes_when_custom_qualifiers_are_obfuscated():
+    prepared = prepare_workspace(
+        "SELECT UserId FROM sales.Users;",
+        input_name="input.sql",
+        options=ObfuscationOptions(llm_safe=True, obfuscate_qualifiers=True),
+    )
+
+    assert prepared.safety.approved is True
+    assert prepared.safety.blockers == ()
+
+
 def test_prepare_workspace_returns_structured_sqlglot_warning_diagnostics(capsys):
     prepared = prepare_workspace(
         "BEGIN TRY SELECT UserId FROM Users END TRY BEGIN CATCH SELECT 2 END CATCH;",

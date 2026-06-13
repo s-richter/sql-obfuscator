@@ -54,7 +54,8 @@ This writes:
 
 The tool replaces identifiers such as table names, column names, CTE names, aliases, and
 temp-table names. It does not replace string values, numeric values, comments, variables,
-function names, or schema qualifiers unless you enable the relevant sanitizing options.
+or function names. Custom schema and catalog/database qualifiers on table and column
+references can be obfuscated with `--obfuscate-qualifiers`.
 
 Use a seed when you want repeatable generated names:
 
@@ -69,21 +70,24 @@ Use this command before sending SQL outside your environment:
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments
 ```
 
-This replaces identifiers, removes comments, and sanitizes string and numeric values.
-`--llm-safe` adds a final check. It stops with an error when the tool cannot confirm that
-the generated SQL is suitable for the recommended external-sharing workflow. For example,
-it rejects statements that could not be fully obfuscated and higher-risk names that remain
+This replaces identifiers, obfuscates custom schema and catalog/database qualifiers on table
+and column references, removes comments, and sanitizes string and numeric values.
+`--llm-safe` adds a final check. It stops with an error when the tool cannot confirm that the
+generated SQL is suitable for the recommended external-sharing workflow. For example, it
+rejects statements that could not be fully obfuscated and higher-risk names that remain
 visible.
 
 | Flag | Purpose |
 | ---- | ------- |
-| `--llm-safe` | Fail closed when preserved statements or known higher-risk visible names remain. |
-| `--redaction-mode irreversible` | Replace selected literals and stripped comments with placeholders without preserving original values for restoration. |
+| `--llm-safe` | Stop with an error when statements were copied through without full obfuscation or known higher-risk visible names remain. |
+| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table and column references. |
+| `--redaction-mode irreversible` | Use one-way redaction so original literal values are not stored for restoration. |
 | `--redact-literals` | Sanitize string and numeric values. |
 | `--strip-comments` | Remove SQL comments from the generated external-sharing script. |
 
@@ -159,10 +163,13 @@ integrity checks.
 
 ## Current Limits
 
-- Some advanced procedural T-SQL constructs cannot be fully transformed. The tool may preserve
-  those statements and print a parser-fallback notice.
-- Use `--llm-safe` before external sharing. It rejects preserved statements and known
-  higher-risk visible names, but it is not a complete confidentiality guarantee.
+- Some advanced procedural T-SQL constructs cannot be fully transformed. The tool may copy
+  those statements through without full obfuscation and print a parser fallback notice.
+- Use `--llm-safe` before external sharing. It rejects statements copied through without
+  full obfuscation and known higher-risk visible names, but it is not a complete
+  confidentiality guarantee.
+- `--obfuscate-qualifiers` covers table and column references. Schema qualifiers on
+  qualified function calls may still remain visible.
 - Boolean and `NULL` tokens are not redacted. Numeric datatype parameters such as
   `NUMERIC(10,2)` are intentionally preserved.
 - SQL formatting and comments can change during regeneration.

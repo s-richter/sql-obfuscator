@@ -21,6 +21,7 @@ def test_cli_reference_mentions_key_cli_flags():
 
     for expected in (
         "`--strict-go`",
+        "`--obfuscate-qualifiers`",
         "`--stdout-only`",
         "`--output-dir <dir>`",
     ):
@@ -33,7 +34,7 @@ def test_readme_external_llm_example_describes_redaction_mode_flag():
     readme_text = (root / "README.md").read_text(encoding="utf-8")
 
     assert "`--redaction-mode irreversible`" in readme_text
-    assert "without preserving original values for restoration" in readme_text
+    assert "original literal values are not stored for restoration" in readme_text
 
 
 def test_cli_reference_and_cli_help_match_recent_flags():
@@ -41,8 +42,8 @@ def test_cli_reference_and_cli_help_match_recent_flags():
     reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
 
     checks = {
-        "obfuscate": ("--strict-go", "--stdout-only", "--output-dir"),
-        "roundtrip": ("--diff-report", "--stdout-only", "--output-dir"),
+        "obfuscate": ("--strict-go", "--obfuscate-qualifiers", "--stdout-only", "--output-dir"),
+        "roundtrip": ("--diff-report", "--obfuscate-qualifiers", "--stdout-only", "--output-dir"),
         "translate": ("--report-only", "--stdout-only", "--output-dir"),
     }
     for command, flags in checks.items():
@@ -88,6 +89,8 @@ def test_docs_index_links_to_storage_seam_decision():
 
     assert "ADR 0001" in docs_index
     assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
+    assert "ADR 0002" in docs_index
+    assert "adr/0002-add-explicit-qualifier-obfuscation.md" in docs_index
 
 
 def test_website_hosting_guardrails_are_recorded_as_durable_architecture_doc():
