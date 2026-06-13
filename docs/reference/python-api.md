@@ -1,9 +1,11 @@
 # Python Workflow API
 
 The workflow API exposes the same core operations as the CLI without reading files, printing
-output, or depending on HTTP concepts.
+terminal output, or assuming a web server.
 
-Use it when integrating SQL obfuscation into another Python application.
+Use it when integrating SQL obfuscation into another Python application. In this page,
+**host** means the application that calls the library, such as the CLI, a desktop app, or a
+web app.
 
 ## Main Imports
 
@@ -99,9 +101,10 @@ instructions = build_default_llm_instructions(
 print(instructions)
 ```
 
-Instruction rendering is host-neutral. A desktop or web host can preview the generated
-Markdown without importing local workspace persistence. `sql_obfuscator.workspace` retains
-its existing `build_default_llm_instructions()` entry point as a compatibility delegator.
+Instruction rendering does not depend on the CLI, desktop UI, or web UI. A desktop or web
+host can preview the generated Markdown without importing local workspace persistence.
+`sql_obfuscator.workspace` retains its existing `build_default_llm_instructions()` entry
+point for compatibility.
 
 The snapshot contains:
 
@@ -177,11 +180,10 @@ store.save_workspace_snapshot(
 snapshot = store.load_workspace_snapshot(Path("script.obf"))
 ```
 
-The functions in `sql_obfuscator.workspace` remain available as compatibility delegators
-to `LocalWorkspaceStore`. New local persistence behavior should use
-`LocalWorkspaceStore` or `LocalWorkspaceApplication`, not expand the compatibility surface.
-A future web host can provide tenant-scoped persistence without changing the host-neutral
-workflow operations.
+The functions in `sql_obfuscator.workspace` remain available for existing callers and
+delegate to `LocalWorkspaceStore`. New local persistence behavior should use
+`LocalWorkspaceStore` or `LocalWorkspaceApplication`. A future web host can provide
+tenant-scoped persistence without changing the workflow operations.
 
 ## Run Local Workflow Operations
 
@@ -211,9 +213,9 @@ print(translated.summary.translated_sql_persisted)
 ```
 
 Local application methods return workflow results plus a `summary` object with structured
-operation facts such as workspace path, output path, written artifacts, persistence status,
-and typed workflow counts. CLI handlers render those summaries as text; desktop and web
-hosts can render the same facts without reading report dictionaries.
+operation facts such as workspace path, output path, written files, persistence status, and
+typed workflow counts. CLI handlers render those summaries as text; desktop and web hosts
+can render the same facts without reading report dictionaries.
 
 ## Inspect A Local Workspace
 
@@ -232,10 +234,11 @@ for artifact in inspection.artifact_statuses:
 ```
 
 `inspect_workspace()` validates integrity and returns structured settings, counts, privacy
-flags, and an ordered artifact inventory with media type, availability, read-only status,
-and integrity protection metadata. `inspection.artifacts` remains a path-to-availability
-shortcut for compatibility. The CLI renders this result as text. A desktop host can render
-an artifact tree, and a web host can expose the same facts on a workspace page.
+flags, and an ordered workspace-file inventory with media type, availability, read-only
+status, and integrity protection metadata. `inspection.artifacts` remains a
+path-to-availability shortcut for compatibility. The CLI renders this result as text. A
+desktop host can render a workspace file tree, and a web host can expose the same facts on a
+workspace page.
 
 ## Browse Local Workspace Artifacts
 
@@ -254,8 +257,8 @@ content = app.load_workspace_artifact(Path("script.obf"), "obfuscated.sql")
 print(content.text)
 ```
 
-`open_workspace()` validates integrity and returns an ordered artifact tree. Each artifact
-describes its kind, media type, availability, read-only status, and whether workspace
+`open_workspace()` validates integrity and returns an ordered workspace file tree. Each file
+entry describes its kind, media type, availability, read-only status, and whether workspace
 integrity metadata protects it. `load_workspace_artifact()` reads only cataloged workspace
 paths, rejects traversal, escaping links, and unknown paths, and validates integrity before
 loading content.
@@ -302,7 +305,8 @@ print(result.deobfuscated_sql)
 `analyze_deobfuscation()` returns restored SQL, a diagnostic report, safety findings, and an
 updated LLM workflow report.
 
-Workflow results also expose host-neutral `diagnostics` tuples. Each `WorkflowDiagnostic`
+Workflow results also expose `diagnostics` tuples that any host can render. Each
+`WorkflowDiagnostic`
 contains a stable `code`, `severity`, user-facing `message`, optional `recommendation`, and
 optional statement or identifier context:
 
@@ -409,9 +413,9 @@ else:
     print(result.translation.failures)
 ```
 
-`translate_document()` returns the translation report together with the host-neutral
-success decision used by the CLI. A GUI or web adapter can render the same structured
-result without reconstructing command rules.
+`translate_document()` returns the translation report together with the success decision
+used by the CLI. A GUI or web adapter can render the same structured result without
+reconstructing command rules.
 
 ## Adapter Responsibilities
 
@@ -420,7 +424,7 @@ adapter owns:
 
 - reading input
 - choosing storage
-- persisting artifacts
+- persisting generated files
 - rendering messages
 - mapping failures to CLI exit codes, HTTP responses, or job status
 
@@ -451,11 +455,10 @@ for diagnostic in operation.diagnostics:
     print(diagnostic.severity, diagnostic.message)
 ```
 
-The adapter composes the host-neutral workflow module with `LocalWorkspaceStore`. Its
-structured results report workspace paths, written artifacts, and diagnostics without
-printing output or choosing terminal exit codes. The CLI uses the same adapter and remains
-responsible for argument parsing, stdin, terminal messages, sibling output files, and exit
-codes.
+The adapter composes the workflow module with `LocalWorkspaceStore`. Its structured results
+report workspace paths, written files, and diagnostics without printing output or choosing
+terminal exit codes. The CLI uses the same adapter and remains responsible for argument
+parsing, stdin, terminal messages, sibling output files, and exit codes.
 
 ## Related Documents
 

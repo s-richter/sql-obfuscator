@@ -100,7 +100,7 @@ It contains:
 
 - whether external-sharing approval was blocked
 - whether manual review is recommended
-- fallback-preserved statement count
+- count of statements copied through without full obfuscation
 - visible higher-risk name classes
 - occurrence counts and examples
 - privacy-audit parse errors, when applicable
@@ -115,7 +115,7 @@ It summarizes:
 
 - whether `--llm-safe` was requested
 - whether external-sharing approval passed
-- transformed and fallback-preserved statement counts
+- counts of fully transformed statements and statements copied through without full obfuscation
 - visible privacy warning and blocker counts
 - literal redaction counts
 - later unresolved, ambiguous, and low-confidence restoration counts
@@ -163,9 +163,9 @@ stmt_0001
 stmt_0002
 ```
 
-The documentation calls these **statement anchors**. They help the tool associate edited SQL
-with the original obfuscated statements. Generated `llm_instructions.md` lists the IDs and
-asks an external LLM to return targeted statement replacements.
+These statement IDs help the tool associate edited SQL with the original obfuscated
+statements. Generated `llm_instructions.md` lists the IDs and asks an external LLM to return
+targeted statement replacements.
 
 Prefer `apply-llm-edits` over manual full-file editing. It uses statement IDs to preserve
 untouched statements exactly.
@@ -197,7 +197,7 @@ This validates integrity and prints:
 - run settings
 - batch, statement, and mapping counts
 - tracked-file count
-- artifact and report availability
+- generated-file and report availability
 - privacy summary state
 
 ## Related Documents

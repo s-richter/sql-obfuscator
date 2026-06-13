@@ -36,8 +36,8 @@ Detailed documentation:
 | statement replacement | A JSON edit that asks the tool to replace one known SQL statement instead of accepting a full rewritten file. |
 | dry run | A validation pass that prints diagnostics without writing restored SQL. |
 
-For external-sharing terminology such as `--llm-safe`, fail-closed behavior, bounded edits,
-and expert mode, see [the LLM-sharing guide](llm-sharing.md).
+For external-sharing checks, redaction choices, structured edits, and manual-review
+workflows, see [the LLM-sharing guide](llm-sharing.md).
 
 ## 1. Basic Obfuscation
 
@@ -110,8 +110,9 @@ This command:
 - replaces string and numeric values
 - stops with an error if known higher-risk visible content remains
 
-The stop-on-risk behavior is sometimes called **fail-closed** behavior. It prevents a failed
-safety check from being mistaken for approved external-sharing output.
+The command stops when a safety check fails. This prevents a failed check from being
+mistaken for approved external-sharing output. This stop-on-failure behavior is sometimes
+called **fail-closed** behavior.
 
 If the command succeeds, send only:
 
@@ -302,7 +303,7 @@ This command:
 
 - validates protected workspace files
 - prints run settings and counts
-- lists available artifacts and reports
+- lists available generated files and reports
 - shows external-sharing privacy flags when present
 
 Read [Workspaces and Reports](../reference/workspaces-and-reports.md) for the complete file

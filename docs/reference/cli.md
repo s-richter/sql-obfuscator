@@ -271,7 +271,7 @@ This validates workspace integrity and prints:
 - dialect, seed, formatting mode, batch count, and statement count
 - identifier mapping counts
 - tracked-file count
-- presence of generated artifacts and reports
+- presence of generated files and reports
 - privacy summary flags when available
 
 ## Stdin Examples
