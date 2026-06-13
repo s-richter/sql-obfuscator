@@ -80,6 +80,13 @@ the generated SQL is suitable for the recommended external-sharing workflow. For
 it rejects statements that could not be fully obfuscated and higher-risk names that remain
 visible.
 
+| Flag | Purpose |
+| ---- | ------- |
+| `--llm-safe` | Fail closed when preserved statements or known higher-risk visible names remain. |
+| `--redaction-mode irreversible` | Replace selected literals and stripped comments with placeholders without preserving original values for restoration. |
+| `--redact-literals` | Sanitize string and numeric values. |
+| `--strip-comments` | Remove SQL comments from the generated external-sharing script. |
+
 Important: `--llm-safe` is a validation check, not a redaction preset. Use
 `--redact-literals` and `--strip-comments` when preparing SQL for sharing.
 
