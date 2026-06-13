@@ -107,7 +107,7 @@ python obfuscator.py obfuscate sample.sql \
 This command:
 
 - replaces supported identifiers
-- obfuscates custom schema qualifiers and catalog/database qualifiers on table and column references
+- obfuscates custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls
 - removes comments
 - replaces string and numeric values
 - stops with an error if known higher-risk visible content remains

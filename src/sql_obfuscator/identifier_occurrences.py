@@ -255,3 +255,31 @@ def qualifier_identifier_occurrences(
             )
 
     return tuple(occurrences)
+
+
+def qualified_function_schema_occurrence(
+    node: exp.Dot,
+    *,
+    profile: DialectProfile,
+    dialect: str,
+    batch_index: int,
+    statement_index: int,
+) -> IdentifierOccurrence | None:
+    if not isinstance(node.expression, exp.Anonymous):
+        return None
+    schema = node.this
+    if not isinstance(schema, exp.Identifier):
+        return None
+
+    lexeme = identifier_raw(schema, profile=profile) or schema.name
+    if is_common_schema_qualifier(lexeme, dialect=dialect):
+        return None
+
+    return IdentifierOccurrence(
+        node=node,
+        identifier=schema,
+        lexeme=lexeme,
+        kind="schema_qualifier",
+        role="function_schema_qualifier",
+        context=node_context(node, batch_index=batch_index, statement_index=statement_index),
+    )

@@ -54,8 +54,9 @@ This writes:
 
 The tool replaces identifiers such as table names, column names, CTE names, aliases, and
 temp-table names. It does not replace string values, numeric values, comments, variables,
-or function names. Custom schema and catalog/database qualifiers on table and column
-references can be obfuscated with `--obfuscate-qualifiers`.
+or function names. Custom schema and catalog/database qualifiers on table references,
+column references, and qualified function calls can be obfuscated with
+`--obfuscate-qualifiers`.
 
 Use a seed when you want repeatable generated names:
 
@@ -86,7 +87,7 @@ visible.
 | Flag | Purpose |
 | ---- | ------- |
 | `--llm-safe` | Stop with an error when statements were copied through without full obfuscation or known higher-risk visible names remain. |
-| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table and column references. |
+| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls. |
 | `--redaction-mode irreversible` | Use one-way redaction so original literal values are not stored for restoration. |
 | `--redact-literals` | Sanitize string and numeric values. |
 | `--strip-comments` | Remove SQL comments from the generated external-sharing script. |
@@ -168,8 +169,8 @@ integrity checks.
 - Use `--llm-safe` before external sharing. It rejects statements copied through without
   full obfuscation and known higher-risk visible names, but it is not a complete
   confidentiality guarantee.
-- `--obfuscate-qualifiers` covers table and column references. Schema qualifiers on
-  qualified function calls may still remain visible.
+- `--obfuscate-qualifiers` covers qualifier names, not function names. User-defined or
+  unknown function names may still remain visible.
 - Boolean and `NULL` tokens are not redacted. Numeric datatype parameters such as
   `NUMERIC(10,2)` are intentionally preserved.
 - SQL formatting and comments can change during regeneration.

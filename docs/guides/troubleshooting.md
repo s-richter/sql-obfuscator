@@ -33,8 +33,8 @@ Common causes:
 2. Check `blocking_identifier_classes`, `blockers`, and `identifier_surface`.
 3. Open `script.obf/reports/llm_workflow_report.json` for statement and redaction counts.
 4. Remove, isolate, manually review, or obfuscate the visible content. Use
-   `--obfuscate-qualifiers` for custom schema and catalog/database qualifiers on table and
-   column references.
+   `--obfuscate-qualifiers` for custom schema and catalog/database qualifiers on table
+   references, column references, and qualified function calls.
 5. Run `obfuscate --llm-safe` again before external sharing.
 
 The workspace is still written locally for diagnosis. Do not share the workspace folder.
