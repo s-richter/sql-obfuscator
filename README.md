@@ -78,7 +78,8 @@ python obfuscator.py obfuscate script.sql \
 ```
 
 This replaces identifiers, obfuscates custom schema and catalog/database qualifiers on table
-and column references, removes comments, and sanitizes string and numeric values.
+references, column references, and qualified function calls, removes comments, and sanitizes
+string and numeric values.
 `--llm-safe` adds a final check. It stops with an error when the tool cannot confirm that the
 generated SQL is suitable for the recommended external-sharing workflow. For example, it
 rejects statements that could not be fully obfuscated and higher-risk names that remain

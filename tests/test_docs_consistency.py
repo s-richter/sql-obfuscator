@@ -86,11 +86,15 @@ def test_storage_seam_decision_is_recorded_as_durable_architecture_doc():
 def test_docs_index_links_to_storage_seam_decision():
     root = Path(__file__).resolve().parents[1]
     docs_index = (root / "docs" / "README.md").read_text(encoding="utf-8")
+    adr_0001 = root / "docs" / "adr" / "0001-local-workspace-store-storage-seam.md"
+    adr_0002 = root / "docs" / "adr" / "0002-add-explicit-qualifier-obfuscation.md"
 
     assert "ADR 0001" in docs_index
     assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
+    assert adr_0001.exists()
     assert "ADR 0002" in docs_index
     assert "adr/0002-add-explicit-qualifier-obfuscation.md" in docs_index
+    assert adr_0002.exists()
 
 
 def test_website_hosting_guardrails_are_recorded_as_durable_architecture_doc():
