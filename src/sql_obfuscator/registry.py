@@ -51,17 +51,20 @@ def normalize_identifier(raw: str) -> IdentifierKey:
 
 
 def _mapping_namespace(kind: str) -> str:
-    if kind in {"alias", "cte", "column_alias"}:
+    if kind in {"alias", "cte", "column_alias", "schema_qualifier", "catalog_qualifier"}:
         return kind
     return ""
 
 
 def _mapping_spelling(
     *,
+    kind: str,
     namespace: str,
     original_unquoted: str,
     original_was_quoted: bool,
 ) -> tuple[str, bool]:
+    if kind in {"schema_qualifier", "catalog_qualifier"}:
+        return "", False
     if namespace:
         return original_unquoted, original_was_quoted
     return "", False
@@ -105,6 +108,7 @@ class IdentifierRegistry:
         normalized = self._profile.normalize_identifier(raw_identifier)
         namespace = _mapping_namespace(kind)
         spelling, quoted = _mapping_spelling(
+            kind=kind,
             namespace=namespace,
             original_unquoted=normalized.original_unquoted,
             original_was_quoted=normalized.original_was_quoted,

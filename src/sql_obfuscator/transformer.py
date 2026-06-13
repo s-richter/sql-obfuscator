@@ -10,6 +10,7 @@ from .identifier_occurrences import (
     column_identifier_occurrences,
     identifier_raw,
     node_context,
+    qualifier_identifier_occurrences,
     table_identifier_occurrence,
 )
 from .registry import IdentifierRegistry
@@ -220,6 +221,7 @@ def transform_statements(
     batch_index: int,
     batch_sql: str,
     dialect: str,
+    obfuscate_qualifiers: bool = False,
 ) -> list[Expression]:
     transformed: list[Expression] = []
     type_lexemes_by_start = _column_type_lexemes_by_start(batch_sql, dialect=dialect)
@@ -231,21 +233,41 @@ def transform_statements(
 
         def _transform(node: Expression) -> Expression:
             if isinstance(node, exp.Table):
-                return _rename_table(
+                renamed = _rename_table(
                     node,
                     registry,
                     profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
+                if obfuscate_qualifiers:
+                    return _rename_qualifiers(
+                        renamed,
+                        registry,
+                        profile,
+                        dialect=dialect,
+                        batch_index=batch_index,
+                        statement_index=statement_index,
+                    )
+                return renamed
             if isinstance(node, exp.Column):
-                return _rename_column(
+                renamed = _rename_column(
                     node,
                     registry,
                     profile,
                     batch_index=batch_index,
                     statement_index=statement_index,
                 )
+                if obfuscate_qualifiers:
+                    return _rename_qualifiers(
+                        renamed,
+                        registry,
+                        profile,
+                        dialect=dialect,
+                        batch_index=batch_index,
+                        statement_index=statement_index,
+                    )
+                return renamed
             if isinstance(node, exp.CTE):
                 return _rename_cte(
                     node,
@@ -292,6 +314,34 @@ def transform_statements(
         transformed.append(statement.transform(_transform, copy=True))
 
     return transformed
+
+
+def _rename_qualifiers(
+    node: exp.Table | exp.Column,
+    registry: IdentifierRegistry,
+    profile: DialectProfile,
+    *,
+    dialect: str,
+    batch_index: int,
+    statement_index: int,
+) -> exp.Table | exp.Column:
+    for occurrence in qualifier_identifier_occurrences(
+        node,
+        profile=profile,
+        dialect=dialect,
+        batch_index=batch_index,
+        statement_index=statement_index,
+    ):
+        occurrence.identifier.set(
+            "this",
+            registry.get_or_create(
+                occurrence.lexeme,
+                kind=occurrence.kind,
+                role=occurrence.role,
+                **occurrence.context.as_registry_kwargs(),
+            ),
+        )
+    return node
 
 
 def _column_type_lexemes_by_start(batch_sql: str, *, dialect: str) -> dict[int, str]:

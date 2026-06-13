@@ -40,6 +40,7 @@ class ObfuscationOptions:
     sensitive_columns: frozenset[str] = field(default_factory=frozenset)
     llm_safe: bool = False
     identifier_vocabulary: IdentifierVocabulary | None = None
+    obfuscate_qualifiers: bool = False
 
 
 @dataclass(frozen=True)
@@ -213,6 +214,7 @@ def prepare_workspace(
             redaction_policy=options.redaction_policy,
             sensitive_columns=sensitive_columns,
             identifier_vocabulary=options.identifier_vocabulary,
+            obfuscate_qualifiers=options.obfuscate_qualifiers,
         )
     privacy_summary = obfuscation.privacy_summary or {}
     blockers = tuple(

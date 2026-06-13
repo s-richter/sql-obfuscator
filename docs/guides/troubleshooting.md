@@ -32,7 +32,9 @@ Common causes:
 1. Open `script.obf/reports/privacy_summary.json`.
 2. Check `blocking_identifier_classes`, `blockers`, and `identifier_surface`.
 3. Open `script.obf/reports/llm_workflow_report.json` for statement and redaction counts.
-4. Remove, isolate, or manually review the visible content.
+4. Remove, isolate, manually review, or obfuscate the visible content. Use
+   `--obfuscate-qualifiers` for custom schema and catalog/database qualifiers on table and
+   column references.
 5. Run `obfuscate --llm-safe` again before external sharing.
 
 The workspace is still written locally for diagnosis. Do not share the workspace folder.
@@ -52,14 +54,14 @@ Notice: sqlglot used fallback parsing for 1 statement(s) ...
 Some advanced procedural T-SQL constructs use a compatibility path. A notice alone does not
 mean local obfuscation or roundtrip failed.
 
-For external sharing, `--llm-safe` rejects fallback-preserved statements because the tool
+For external sharing, `--llm-safe` rejects these copied-through statements because the tool
 cannot confirm that their contents were fully sanitized.
 
 ### What To Do
 
 1. Check the command exit code.
 2. For `roundtrip`, inspect `reports/roundtrip_report.json`.
-3. For external sharing, isolate or manually review fallback-preserved SQL.
+3. For external sharing, isolate or manually review SQL that was copied through without full obfuscation.
 4. If behavior appears wrong, reduce the script to the smallest failing statement.
 
 ## Unknown Identifiers

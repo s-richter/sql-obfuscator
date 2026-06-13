@@ -35,6 +35,7 @@ Recommended preparation:
 ```bash
 python obfuscator.py obfuscate script.sql \
   --llm-safe \
+  --obfuscate-qualifiers \
   --redaction-mode irreversible \
   --redact-literals \
   --strip-comments
@@ -88,8 +89,8 @@ restoration:
 - produce rollback or deployment scripts
 - perform a large cross-dialect rewrite
 
-The documentation calls this **expert mode**. That means the LLM output requires explicit
-human review, and restoration may report unknown, ambiguous, or low-confidence identifiers.
+This is an **expert mode** workflow. The LLM output requires explicit human review, and
+restoration may report unknown, ambiguous, or low-confidence identifiers.
 
 Use `deobfuscate --dry-run` before writing restored SQL. Treat override flags as deliberate
 manual-review tools, not as a routine next step.

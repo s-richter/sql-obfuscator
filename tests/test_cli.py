@@ -1543,6 +1543,38 @@ def test_cli_obfuscate_llm_safe_blocks_visible_local_variables(tmp_path: Path, c
     assert privacy_report["identifier_surface"]["local_variables"]["occurrence_count"] == 1
 
 
+def test_cli_obfuscate_qualifiers_allows_llm_safe_custom_schema(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM sales.Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(
+        [
+            "obfuscate",
+            str(sql_file),
+            "--workspace",
+            str(workspace),
+            "--llm-safe",
+            "--obfuscate-qualifiers",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "sales" not in captured.out
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    assert context["obfuscate_qualifiers"] is True
+    mapping = json.loads((workspace / "mapping.json").read_text(encoding="utf-8"))
+    assert any(
+        occurrence["kind"] == "schema_qualifier"
+        for entry in mapping["entries"]
+        for occurrence in entry["occurrences"]
+    )
+    privacy_report = json.loads((workspace / "reports" / "privacy_summary.json").read_text(encoding="utf-8"))
+    assert privacy_report["llm_safe_blocked"] is False
+    assert "custom_schema_qualifiers" not in privacy_report["blocking_identifier_classes"]
+
+
 
 def test_cli_deobfuscate_updates_llm_workflow_report(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
