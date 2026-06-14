@@ -173,6 +173,42 @@ def _add_apply_llm_edits_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_prepare_for_llm_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("sql_file", help="Path to input .sql file, or '-' for stdin")
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help="Workspace folder for saved artifacts (default: <input_stem>.obf)",
+    )
+    parser.add_argument(
+        "--dialect",
+        default="tsql",
+        choices=supported_dialects(),
+        help="SQL dialect profile",
+    )
+    parser.add_argument("--seed", type=int, default=None, help="Deterministic random seed")
+    parser.add_argument(
+        "--instruction-template",
+        default=None,
+        help="Optional path to a markdown template used as llm_instructions.md",
+    )
+    parser.add_argument(
+        "--irreversible",
+        action="store_true",
+        help="Use irreversible literal redaction instead of reversible redaction",
+    )
+    parser.add_argument(
+        "--expert-mode",
+        action="store_true",
+        help="Allow output that requires manual review instead of failing closed",
+    )
+    parser.add_argument(
+        "--print-sql",
+        action="store_true",
+        help="Print obfuscated SQL after the workflow summary",
+    )
+
+
 def build_command_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sql-obfuscator",
@@ -186,6 +222,12 @@ def build_command_parser() -> argparse.ArgumentParser:
     )
     obfuscate_parser.add_argument("sql_file", help="Path to input .sql file, or '-' for stdin")
     _add_common_obfuscation_args(obfuscate_parser)
+
+    prepare_for_llm_parser = subparsers.add_parser(
+        "prepare-for-llm",
+        help="Create LLM-sharing artifacts with recommended workflow defaults",
+    )
+    _add_prepare_for_llm_args(prepare_for_llm_parser)
 
     deobfuscate_parser = subparsers.add_parser(
         "deobfuscate",
@@ -411,6 +453,69 @@ def _run_obfuscate_command(args: argparse.Namespace) -> int:
 
     print(output_sql)
     return 0
+
+
+def _run_prepare_for_llm_command(args: argparse.Namespace) -> int:
+    sql_text, input_path = _read_sql_source(args.sql_file)
+    input_reference = input_path if input_path is not None else Path("stdin.sql")
+    redaction_mode = "irreversible" if args.irreversible else "reversible"
+    operation = LocalWorkspaceApplication().prepare_and_save_workspace(
+        sql_text,
+        input_path=input_reference,
+        workspace_path=Path(args.workspace) if args.workspace else None,
+        options=ObfuscationOptions(
+            dialect=args.dialect,
+            seed=args.seed,
+            redaction_mode=redaction_mode,
+            redact_literals=True,
+            strip_comments=True,
+            llm_safe=True,
+            obfuscate_qualifiers=True,
+        ),
+        instructions_text=_read_optional_template(args.instruction_template),
+    )
+    prepared = operation.prepared
+    _render_sqlglot_diagnostics(operation.diagnostics)
+    if prepared.safety.blockers and not args.expert_mode:
+        _render_llm_safety_decision(
+            safety=prepared.safety,
+            llm_safe_requested=True,
+        )
+    elif prepared.safety.findings:
+        _render_llm_safety_decision(
+            safety=prepared.safety,
+            llm_safe_requested=False,
+        )
+
+    _print_prepare_for_llm_summary(
+        workspace_path=operation.workspace_path,
+        redaction_mode=redaction_mode,
+        manual_review_required=bool(prepared.safety.blockers and args.expert_mode),
+    )
+    if args.print_sql:
+        print(prepared.snapshot.obfuscated_sql)
+    return 0
+
+
+def _print_prepare_for_llm_summary(
+    *,
+    workspace_path: Path,
+    redaction_mode: str,
+    manual_review_required: bool,
+) -> None:
+    print(f"Prepared LLM workflow workspace: {workspace_path}")
+    if manual_review_required:
+        print("Manual review required before sharing.")
+        print("Review:")
+        print(f"  {workspace_path / 'reports' / 'privacy_summary.json'}")
+        print(f"  {workspace_path / 'reports' / 'llm_workflow_report.json'}")
+        print("Send only after review:")
+    else:
+        print("Send these files:")
+    print(f"  {workspace_path / 'obfuscated.sql'}")
+    print(f"  {workspace_path / 'llm_instructions.md'}")
+    print(f"Redaction: {redaction_mode}")
+    print("Validation: manual-review-required" if manual_review_required else "Validation: passed")
 
 
 def _summarize_llm_safe_findings(findings: list[str]) -> str:
@@ -735,6 +840,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "obfuscate":
             return _run_obfuscate_command(args)
+        if args.command == "prepare-for-llm":
+            return _run_prepare_for_llm_command(args)
         if args.command == "deobfuscate":
             return _run_deobfuscate_command(args)
         if args.command == "roundtrip":
