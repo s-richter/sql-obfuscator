@@ -1,14 +1,14 @@
-# SQL Identifier Obfuscator
+# SQL Obfuscator
 
-Python CLI tool for replacing SQL identifiers with generated names while preserving SQL
-structure. It supports T-SQL and Hive, can restore the original identifiers after editing,
-and can translate SQL between the supported dialects.
+Python CLI tool for preparing SQL for local review, external LLM review, restoration after
+LLM-assisted edits, and T-SQL/Hive translation.
 
 Use it when you need to:
 
-- hide table names, column names, CTE names, aliases, and temp-table names
-- send a sanitized SQL script to an external LLM for review or small edits
-- restore original identifiers after an LLM-assisted edit
+- create SQL and instructions that are safer to send to an external LLM
+- restore original identifiers and reversible-redaction placeholders after LLM edits
+- hide table names, column names, CTE names, aliases, temp-table names, and supported
+  qualifiers
 - translate SQL between T-SQL and Hive
 
 ## Installation
@@ -31,15 +31,91 @@ python obfuscator.py --help
 
 ## Choose Your Goal
 
-| Goal                             | Start here                                                        |
-| -------------------------------- | ----------------------------------------------------------------- |
-| Replace identifiers locally      | [Basic obfuscation](#basic-obfuscation)                           |
-| Send SQL to an external LLM      | [Share SQL with an external LLM](#share-sql-with-an-external-llm) |
-| Restore an LLM-edited script     | [Restore edited SQL](#restore-edited-sql)                         |
-| Translate between T-SQL and Hive | [Translate SQL](#translate-sql)                                   |
+| Goal | Start here |
+|---|---|
+| Send SQL to an external LLM | [Prepare SQL for an external LLM](#prepare-sql-for-an-external-llm) |
+| Restore structured LLM edits | [Restore LLM-edited SQL](#restore-llm-edited-sql) |
+| Replace identifiers locally | [Basic obfuscation](#basic-obfuscation) |
+| Translate between T-SQL and Hive | [Translate SQL](#translate-sql) |
 
 For worked examples, see [the command tutorial](docs/guides/command-tutorial.md). For every
 flag, see [the command reference](docs/reference/cli.md).
+
+## Prepare SQL For An External LLM
+
+Use the workflow command before sending SQL outside your environment:
+
+```bash
+python obfuscator.py prepare-for-llm script.sql
+```
+
+This creates a local workspace and applies the recommended external-sharing defaults:
+
+- identifier obfuscation
+- custom schema and catalog/database qualifier obfuscation on supported references
+- reversible literal redaction
+- comment stripping
+- fail-closed validation
+
+`prepare-for-llm` defaults to reversible redaction so edited SQL can be restored with
+original literal values later.
+
+If the command succeeds, send only:
+
+- `script.obf/obfuscated.sql`
+- `script.obf/llm_instructions.md`
+
+Do not send the entire workspace. It contains the original SQL, mappings, and local
+restoration metadata.
+
+Useful options:
+
+| Option | Use it when |
+|---|---|
+| `--irreversible` | Original literal values do not need to be restored later. |
+| `--expert-mode` | You intend to manually review output that automatic validation cannot approve. |
+| `--print-sql` | You explicitly want the obfuscated SQL printed after the workflow summary. |
+
+`prepare-for-llm` does not call an LLM. You send the generated files to your chosen LLM and
+save the returned JSON locally.
+
+## Restore LLM-Edited SQL
+
+For LLM-assisted edits, use the structured statement-replacement format described in
+`script.obf/llm_instructions.md`. Each edit targets a known statement ID and leaves
+unrelated statements untouched.
+
+After the LLM returns JSON, save it locally as:
+
+```text
+script.obf/llm_edits.json
+```
+
+Then run:
+
+```bash
+python obfuscator.py restore-from-llm \
+  --workspace script.obf \
+  --edits script.obf/llm_edits.json
+```
+
+This applies the edit JSON, writes `script.obf/llm_response_obfuscated.sql`, validates
+restoration, and writes `script.obf/deobfuscated.sql` only when validation passes.
+
+Use a dry run to check the workflow without writing derived outputs:
+
+```bash
+python obfuscator.py restore-from-llm \
+  --workspace script.obf \
+  --edits script.obf/llm_edits.json \
+  --dry-run
+```
+
+Lower-level `obfuscate`, `apply-llm-edits`, `deobfuscate`, and `validate-before-write`
+commands remain available for custom workflows and direct edited-SQL restoration.
+
+For the full workflow, redaction choices, and safety checks, read
+[Sharing SQL With an External LLM](docs/guides/llm-sharing.md).
 
 ## Basic Obfuscation
 
@@ -50,71 +126,16 @@ python obfuscator.py obfuscate script.sql
 This writes:
 
 - `script_obfuscated.sql`: SQL with generated identifier names
-- `script.obf/`: a local workspace used for later validation or restoration (for details about workspaces see below)
+- `script.obf/`: a local workspace used for later validation or restoration
 
-The tool replaces identifiers such as table names, column names, CTE names, aliases, and
-temp-table names. It does not replace string values, numeric values, comments, variables,
-or function names. Custom schema and catalog/database qualifiers on table references,
-column references, and qualified function calls can be obfuscated with
-`--obfuscate-qualifiers`.
+This baseline command is suitable for local use. It does not remove comments or redact
+literal values unless you pass explicit redaction options.
 
 Use a seed when you want repeatable generated names:
 
 ```bash
 python obfuscator.py obfuscate script.sql --seed 42
 ```
-
-## Share SQL With an External LLM
-
-Use this command before sending SQL outside your environment:
-
-```bash
-python obfuscator.py prepare-for-llm script.sql
-```
-
-This replaces identifiers, obfuscates custom schema and catalog/database qualifiers on table
-references, column references, and qualified function calls, removes comments, redacts string
-and numeric values, and runs fail-closed validation. `prepare-for-llm` defaults to reversible
-redaction so edited SQL can be restored with original literal values later.
-
-| Flag | Purpose |
-| ---- | ------- |
-| `--irreversible` | Use one-way redaction when original literal values do not need to be restored. |
-| `--expert-mode` | Allow output that automatic validation cannot approve; review generated reports before sharing. |
-| `--print-sql` | Print obfuscated SQL to stdout after the workflow summary. |
-
-For custom redaction policies or unusual output modes, use the lower-level `obfuscate`
-command with explicit flags.
-
-If the command succeeds, send only:
-
-- `script.obf/obfuscated.sql`
-- `script.obf/llm_instructions.md`
-
-Do not send the entire workspace. It contains the original SQL and restoration metadata.
-
-For the full workflow, redaction choices, and an explanation of safety errors, read
-[Sharing SQL With an External LLM](docs/guides/llm-sharing.md).
-
-## Restore Edited SQL
-
-For LLM-assisted edits, ask the model to return the structured statement replacements
-described in `script.obf/llm_instructions.md`. Then restore the result:
-
-```bash
-python obfuscator.py restore-from-llm \
-  --workspace script.obf \
-  --edits script.obf/llm_edits.json
-```
-
-This applies the structured statement-replacement JSON, where each edit targets a known
-statement ID and leaves unrelated statements untouched. The command writes
-`script.obf/llm_response_obfuscated.sql`, validates restoration, and writes
-`script.obf/deobfuscated.sql` only when validation passes. Use `restore-from-llm --dry-run`
-to validate the full workflow without writing derived outputs.
-
-Lower-level `apply-llm-edits`, `deobfuscate`, and `validate-before-write` commands remain
-available for custom workflows and direct edited-SQL restoration.
 
 ## Translate SQL
 
@@ -133,7 +154,7 @@ that the translated SQL has identical behavior on the target database.
 
 Most commands create or use a workspace such as `script.obf/`. A workspace stores the
 original SQL, obfuscated SQL, mappings needed for restoration, generated LLM instructions,
-and diagnostic reports.
+redaction metadata when reversible redaction is used, and diagnostic reports.
 
 Treat the workspace as sensitive local data. See
 [Workspaces and Reports](docs/reference/workspaces-and-reports.md) for its file layout and
@@ -142,7 +163,7 @@ integrity checks.
 ## Documentation
 
 - [Documentation Index](docs/README.md): all guides, reference material, and maintainer notes
-- [Sharing SQL With an External LLM](docs/guides/llm-sharing.md): privacy guidance and edit workflow
+- [Sharing SQL With an External LLM](docs/guides/llm-sharing.md): recommended and expert LLM workflows
 - [Command Tutorial](docs/guides/command-tutorial.md): worked examples for common tasks
 - [Command Reference](docs/reference/cli.md): commands, flags, output modes, and exit behavior
 - [Workspaces and Reports](docs/reference/workspaces-and-reports.md): workspace files, reports, and integrity checks
@@ -157,8 +178,8 @@ integrity checks.
 - Use `prepare-for-llm` before external sharing. It rejects statements copied through
   without full obfuscation and known higher-risk visible names, but it is not a complete
   confidentiality guarantee.
-- `--obfuscate-qualifiers` covers qualifier names, not function names. User-defined or
-  unknown function names may still remain visible.
+- Qualifier obfuscation covers qualifier names, not function names. User-defined or unknown
+  function names may still remain visible.
 - Boolean and `NULL` tokens are not redacted. Numeric datatype parameters such as
   `NUMERIC(10,2)` are intentionally preserved.
 - SQL formatting and comments can change during regeneration.
