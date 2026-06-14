@@ -793,6 +793,247 @@ def test_cli_apply_llm_edits_rejects_unknown_statement_id(tmp_path: Path, capsys
     assert "unknown statement_id" in captured.err
 
 
+def test_cli_restore_from_llm_applies_edits_and_writes_restored_sql(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+    assert main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": anchor["statement_id"],
+                        "sql": f"{anchor['obfuscated_sql']} WHERE 1 = 1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["restore-from-llm", "--workspace", str(workspace), "--edits", str(edits_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Restored LLM workflow output:" in captured.out
+    assert str(workspace / "deobfuscated.sql") in captured.out
+    assert "Applied obfuscated response:" in captured.out
+    assert str(workspace / "llm_response_obfuscated.sql") in captured.out
+    assert "Validation: passed" in captured.out
+    assert "UserId FROM Users" not in captured.out
+    assert (workspace / "llm_response_obfuscated.sql").exists()
+    assert (workspace / "deobfuscated.sql").exists()
+    restored_sql = (workspace / "deobfuscated.sql").read_text(encoding="utf-8")
+    assert "Users" in restored_sql
+    assert "UserId" in restored_sql
+    assert "1 = 1" in restored_sql
+
+
+def test_cli_restore_from_llm_dry_run_writes_no_workflow_outputs(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+    assert main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": anchor["statement_id"],
+                        "sql": f"{anchor['obfuscated_sql']} WHERE 1 = 1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "restore-from-llm",
+            "--workspace",
+            str(workspace),
+            "--edits",
+            str(edits_path),
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "restore-from-llm dry-run summary:" in captured.out
+    assert "unknown_count: 0" in captured.out
+    assert "low_confidence_count: 0" in captured.out
+    assert (workspace / "llm_response_obfuscated.sql").exists() is False
+    assert (workspace / "deobfuscated.sql").exists() is False
+    assert (workspace / "reports" / "llm_edit_application_report.json").exists() is False
+    assert (workspace / "reports" / "deobfuscation_report.json").exists() is False
+
+
+def test_cli_restore_from_llm_out_controls_restored_sql_path(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+    restored_path = tmp_path / "restored.sql"
+    assert main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [{"statement_id": anchor["statement_id"], "sql": anchor["obfuscated_sql"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "restore-from-llm",
+            "--workspace",
+            str(workspace),
+            "--edits",
+            str(edits_path),
+            "--out",
+            str(restored_path),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert str(restored_path) in captured.out
+    assert restored_path.exists()
+    assert "Users" in restored_path.read_text(encoding="utf-8")
+    assert (workspace / "llm_response_obfuscated.sql").exists()
+
+
+def test_cli_restore_from_llm_blocks_unresolved_until_override(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+    assert main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": anchor["statement_id"],
+                        "sql": "SELECT unknown_identifier FROM unknown_table",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(["restore-from-llm", "--workspace", str(workspace), "--edits", str(edits_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "Validation failed: unresolved mappings found" in captured.err
+    assert (workspace / "llm_response_obfuscated.sql").exists()
+    assert (workspace / "deobfuscated.sql").exists() is False
+
+    rc = main(
+        [
+            "restore-from-llm",
+            "--workspace",
+            str(workspace),
+            "--edits",
+            str(edits_path),
+            "--allow-unresolved",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    assert (workspace / "deobfuscated.sql").exists()
+
+
+def test_cli_restore_from_llm_dry_run_returns_nonzero_for_unresolved_edits(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+    assert main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)]) == 0
+    capsys.readouterr()
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    anchor = context["statement_anchors"][0]
+    edits_path = workspace / "llm_edits.json"
+    edits_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "format": "statement_replacements",
+                "edits": [
+                    {
+                        "statement_id": anchor["statement_id"],
+                        "sql": "SELECT unknown_identifier FROM unknown_table",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = main(
+        [
+            "restore-from-llm",
+            "--workspace",
+            str(workspace),
+            "--edits",
+            str(edits_path),
+            "--dry-run",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "restore-from-llm dry-run summary:" in captured.out
+    assert "unknown_count:" in captured.out
+    assert (workspace / "llm_response_obfuscated.sql").exists() is False
+    assert (workspace / "deobfuscated.sql").exists() is False
+
+
+def test_cli_restore_from_llm_rejects_full_sql_input_flag(tmp_path: Path, capsys):
+    edited_sql = tmp_path / "edited.sql"
+    edited_sql.write_text("SELECT 1;", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["restore-from-llm", "--workspace", str(tmp_path), "--input", str(edited_sql)])
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "the following arguments are required: --edits" in captured.err
+
+
 def test_cli_roundtrip_help_describes_diff_report_flag(capsys):
     with pytest.raises(SystemExit) as exc_info:
         main(["roundtrip", "-h"])
@@ -810,6 +1051,7 @@ def test_cli_roundtrip_help_describes_diff_report_flag(capsys):
         ("deobfuscate", ["--workspace", "--input", "--dry-run", "--allow-unresolved"]),
         ("validate-before-write", ["--workspace", "--input", "--allow-low-confidence"]),
         ("apply-llm-edits", ["--workspace", "--edits", "--dry-run"]),
+        ("restore-from-llm", ["--workspace", "--edits", "--dry-run", "--allow-low-confidence"]),
         ("roundtrip", ["sql_file", "--diff-report", "--stdout-only", "--output-dir"]),
         ("translate", ["--input", "--source-dialect", "--target-dialect", "--stdout-only", "--output-dir"]),
         ("workspace-info", ["--workspace"]),

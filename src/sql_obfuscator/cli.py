@@ -209,6 +209,39 @@ def _add_prepare_for_llm_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_restore_from_llm_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to workspace folder created during preparation",
+    )
+    parser.add_argument(
+        "--edits",
+        required=True,
+        help="Path to JSON statement-replacement edits returned by the LLM",
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional output path for restored SQL (default: <workspace>/deobfuscated.sql)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate edits and restoration safety without writing workflow outputs",
+    )
+    parser.add_argument(
+        "--allow-unresolved",
+        action="store_true",
+        help="Allow unknown/ambiguous mappings and still write restored output",
+    )
+    parser.add_argument(
+        "--allow-low-confidence",
+        action="store_true",
+        help="Allow low-confidence mappings and still write restored output",
+    )
+
+
 def build_command_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sql-obfuscator",
@@ -246,6 +279,12 @@ def build_command_parser() -> argparse.ArgumentParser:
         help="Apply constrained statement-replacement edits to workspace obfuscated SQL",
     )
     _add_apply_llm_edits_args(apply_llm_edits_parser)
+
+    restore_from_llm_parser = subparsers.add_parser(
+        "restore-from-llm",
+        help="Apply bounded LLM edits, validate, and restore SQL",
+    )
+    _add_restore_from_llm_args(restore_from_llm_parser)
 
     roundtrip_parser = subparsers.add_parser(
         "roundtrip",
@@ -582,6 +621,67 @@ def _run_apply_llm_edits_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_restore_from_llm_command(args: argparse.Namespace) -> int:
+    workspace_path = Path(args.workspace)
+    application = LocalWorkspaceApplication()
+    replacement_operation = application.apply_and_save_statement_replacements(
+        workspace_path,
+        load_llm_edits_payload(Path(args.edits)),
+        persist=not args.dry_run,
+    )
+    applied_sql = replacement_operation.replacement.applied_obfuscated_sql
+
+    if args.dry_run:
+        deobfuscation_operation = application.analyze_deobfuscation(workspace_path, applied_sql)
+        _render_sqlglot_diagnostics(
+            (*replacement_operation.diagnostics, *deobfuscation_operation.diagnostics)
+        )
+        print("restore-from-llm dry-run summary:")
+        _print_deobfuscation_summary(
+            deobfuscation_operation.summary.deobfuscation,
+            include_kind_breakdown=True,
+        )
+        if (
+            deobfuscation_operation.summary.has_unresolved
+            or deobfuscation_operation.summary.has_low_confidence
+        ):
+            return 1
+        return 0
+
+    try:
+        deobfuscation_operation = application.validate_and_save_deobfuscation(
+            workspace_path,
+            applied_sql,
+            output_path=Path(args.out) if args.out else None,
+            allow_unresolved=bool(args.allow_unresolved),
+            allow_low_confidence=bool(args.allow_low_confidence),
+        )
+    except DeobfuscationSafetyError as exc:
+        _print_validate_before_write_summary(exc.result.summary)
+        _render_sqlglot_diagnostics(exc.result.diagnostics)
+        if exc.reason == "unresolved":
+            raise WorkspaceError(
+                "Validation failed: unresolved mappings found. "
+                "Use --allow-unresolved to force output."
+            ) from exc
+        raise WorkspaceError(
+            "Validation failed: low-confidence mappings found. "
+            "Use --allow-low-confidence to force output."
+        ) from exc
+
+    _render_sqlglot_diagnostics(
+        (*replacement_operation.diagnostics, *deobfuscation_operation.diagnostics)
+    )
+    restored_output_path = deobfuscation_operation.output_path or workspace_path / "deobfuscated.sql"
+    applied_output_path = (
+        replacement_operation.output_path or workspace_path / "llm_response_obfuscated.sql"
+    )
+    print(f"Restored LLM workflow output: {restored_output_path}")
+    print(f"Applied obfuscated response: {applied_output_path}")
+    print("Validation: passed")
+    return 0
+
+
 def _run_deobfuscate_command(args: argparse.Namespace) -> int:
     workspace_path = Path(args.workspace)
     edited_sql = _read_sql_file(Path(args.input))
@@ -850,6 +950,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_validate_before_write_command(args)
         if args.command == "apply-llm-edits":
             return _run_apply_llm_edits_command(args)
+        if args.command == "restore-from-llm":
+            return _run_restore_from_llm_command(args)
         if args.command == "workspace-info":
             return _run_workspace_info_command(args)
         if args.command == "translate":
