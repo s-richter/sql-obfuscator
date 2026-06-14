@@ -26,7 +26,7 @@ LLM.
 
 ## Files To Share With An External LLM
 
-After successful `obfuscate --llm-safe`, send only:
+After successful `prepare-for-llm`, send only:
 
 ```text
 script.obf/obfuscated.sql
@@ -51,7 +51,7 @@ script.obf/
 |-- integrity.schema.json
 |-- redaction.json                         # reversible redaction only, when placeholders exist
 |-- redaction.schema.json                  # reversible redaction only, when placeholders exist
-|-- llm_response_obfuscated.sql            # after apply-llm-edits, by default
+|-- llm_response_obfuscated.sql            # after restore-from-llm or apply-llm-edits, by default
 |-- deobfuscated.sql                       # after successful restoration
 |-- translated.sql                         # after translate --workspace, in applicable output modes
 `-- reports/
@@ -59,7 +59,7 @@ script.obf/
     |-- privacy_summary.schema.json
     |-- llm_workflow_report.json
     |-- llm_workflow_report.schema.json
-    |-- llm_edit_application_report.json   # after apply-llm-edits
+    |-- llm_edit_application_report.json   # after restore-from-llm or apply-llm-edits
     |-- llm_edit_application_report.schema.json
     |-- deobfuscation_report.json          # after restoration
     |-- coverage_report.txt                # after restoration
@@ -85,7 +85,7 @@ Some files are created only after the relevant command runs.
 | `context.json` | Run settings and statement metadata used during restoration. |
 | `integrity.json` | SHA-256 checksums for protected workspace files. |
 | `redaction.json` | Original literal values for reversible redaction. Always sensitive. |
-| `llm_response_obfuscated.sql` | Edited obfuscated SQL, usually created by `apply-llm-edits`. |
+| `llm_response_obfuscated.sql` | Edited obfuscated SQL, usually created by `restore-from-llm` or `apply-llm-edits`. |
 | `deobfuscated.sql` | Restored final SQL. |
 | `translated.sql` | Workspace copy of translated SQL in applicable translation output modes. |
 
@@ -93,8 +93,8 @@ Some files are created only after the relevant command runs.
 
 ### `privacy_summary.json`
 
-Written during obfuscation. This is the first report to inspect when `--llm-safe` rejects a
-script.
+Written during obfuscation. This is the first report to inspect when fail-closed validation
+rejects a script.
 
 It contains:
 
@@ -123,7 +123,7 @@ It summarizes:
 
 ### `llm_edit_application_report.json`
 
-Written by `apply-llm-edits`.
+Written by `restore-from-llm` or `apply-llm-edits`.
 
 It records:
 
@@ -168,8 +168,8 @@ These statement IDs help the tool associate edited SQL with the original obfusca
 statements. Generated `llm_instructions.md` lists the IDs and asks an external LLM to return
 targeted statement replacements.
 
-Prefer `apply-llm-edits` over manual full-file editing. It uses statement IDs to preserve
-untouched statements exactly.
+Prefer `restore-from-llm` or `apply-llm-edits` over manual full-file editing. Structured
+edit workflows use statement IDs to preserve untouched statements exactly.
 
 ## Integrity Checks
 

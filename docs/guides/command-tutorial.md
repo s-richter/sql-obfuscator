@@ -9,10 +9,10 @@ your immediate goal, then follow links to the detailed reference only when neede
 |---|---|
 | Replace identifiers locally | [1. Basic obfuscation](#1-basic-obfuscation) |
 | Generate repeatable output | [2. Repeatable output and custom folders](#2-repeatable-output-and-custom-folders) |
-| Send SQL to an external LLM for explanation | [3. Share SQL for a read-only LLM task](#3-share-sql-for-a-read-only-llm-task) |
-| Send SQL to an LLM and restore edited values later | [4. Use reversible literal redaction](#4-use-reversible-literal-redaction) |
-| Apply targeted LLM edits | [5. Apply structured LLM edits](#5-apply-structured-llm-edits) |
-| Validate and restore edited SQL | [6. Validate and restore](#6-validate-and-restore) |
+| Send SQL to an external LLM | [3. Prepare SQL for an external LLM](#3-prepare-sql-for-an-external-llm) |
+| Restore structured LLM edits | [4. Restore from LLM edits](#4-restore-from-llm-edits) |
+| Use lower-level LLM commands | [5. Customize the LLM workflow](#5-customize-the-llm-workflow) |
+| Validate and restore full edited SQL | [6. Validate and restore a full edited SQL file](#6-validate-and-restore-a-full-edited-sql-file) |
 | Verify obfuscation on a script | [7. Run a roundtrip check](#7-run-a-roundtrip-check) |
 | Translate T-SQL and Hive | [8. Translate SQL](#8-translate-sql) |
 | Inspect generated files | [9. Inspect a workspace](#9-inspect-a-workspace) |
@@ -88,20 +88,15 @@ python obfuscator.py obfuscate sample.sql --output-dir artifacts/sql
 The workspace and generated SQL file serve different purposes. The generated SQL file is
 the transformed output. The workspace contains local restoration metadata and reports.
 
-## 3. Share SQL For A Read-Only LLM Task
+## 3. Prepare SQL For An External LLM
 
-Suppose you want an external LLM to explain a query or suggest performance questions without
-editing the script.
+Suppose you want an external LLM to explain a query, suggest performance questions, or make
+small bounded edits.
 
 Run:
 
 ```bash
-python obfuscator.py obfuscate sample.sql \
-  --llm-safe \
-  --obfuscate-qualifiers \
-  --redaction-mode irreversible \
-  --redact-literals \
-  --strip-comments
+python obfuscator.py prepare-for-llm sample.sql
 ```
 
 This command:
@@ -109,12 +104,13 @@ This command:
 - replaces supported identifiers
 - obfuscates custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls
 - removes comments
-- replaces string and numeric values
+- replaces string and numeric values with reversible placeholders
 - stops with an error if known higher-risk visible content remains
+- avoids writing a sibling `sample_obfuscated.sql` file
 
-The command stops when a safety check fails. This prevents a failed check from being
-mistaken for approved external-sharing output. This stop-on-failure behavior is sometimes
-called **fail-closed** behavior.
+The command stops when a safety check fails. This prevents a failed check from being mistaken
+for approved external-sharing output. This stop-on-failure behavior is fail-closed
+validation.
 
 If the command succeeds, send only:
 
@@ -125,51 +121,19 @@ sample.obf/llm_instructions.md
 
 Do not send the entire workspace. It contains the original SQL and restoration metadata.
 
+Use one-way redaction when original literal values do not need to be restored:
+
+```bash
+python obfuscator.py prepare-for-llm sample.sql --irreversible
+```
+
 For the exact safety checks and limitations, read
 [Sharing SQL With an External LLM](llm-sharing.md).
 
-## 4. Use Reversible Literal Redaction
+## 4. Restore From LLM Edits
 
-Use reversible redaction when the LLM will edit SQL and the original literal values must be
-restored afterward.
-
-Input file `sample.sql`:
-
-```sql
-SELECT account_id
-FROM payments
-WHERE card_last4 = '1234'
-  AND amount > 250.00;
-```
-
-Run:
-
-```bash
-python obfuscator.py obfuscate sample.sql \
-  --llm-safe \
-  --obfuscate-qualifiers \
-  --redaction-mode reversible \
-  --redact-literals \
-  --strip-comments
-```
-
-Literal values become placeholders similar to:
-
-```text
-__SQL_OBFUSCATOR_STR_000001__
-__SQL_OBFUSCATOR_NUM_000002__
-```
-
-The workspace stores the original values locally in `redaction.json`. Ask the LLM to preserve
-the placeholders exactly.
-
-Use irreversible redaction instead when original values do not need to be restored.
-
-## 5. Apply Structured LLM Edits
-
-For edited SQL, ask the LLM to return JSON statement replacements instead of a complete
-rewritten script. Generated `llm_instructions.md` describes the expected format and available
-statement IDs.
+Ask the LLM to return the JSON statement replacements described in
+`sample.obf/llm_instructions.md`. Save the response as `sample.obf/llm_edits.json`.
 
 Example `sample.obf/llm_edits.json`:
 
@@ -189,7 +153,48 @@ Example `sample.obf/llm_edits.json`:
 The generated names above are illustrative. Use the exact names from your
 `obfuscated.sql`.
 
-Apply the edits:
+Apply, validate, and restore in one command:
+
+```bash
+python obfuscator.py restore-from-llm \
+  --workspace sample.obf \
+  --edits sample.obf/llm_edits.json
+```
+
+Result:
+
+```text
+sample.obf/llm_response_obfuscated.sql
+sample.obf/deobfuscated.sql
+```
+
+`restore-from-llm` writes restored SQL only when validation passes. Check the workflow
+without writing derived outputs:
+
+```bash
+python obfuscator.py restore-from-llm \
+  --workspace sample.obf \
+  --edits sample.obf/llm_edits.json \
+  --dry-run
+```
+
+## 5. Customize The LLM Workflow
+
+Use lower-level commands when you need to inspect or customize each step.
+
+Prepare SQL with a custom redaction policy:
+
+```bash
+python obfuscator.py obfuscate sample.sql \
+  --llm-safe \
+  --obfuscate-qualifiers \
+  --redaction-mode reversible \
+  --redact-literals \
+  --strip-comments \
+  --redaction-policy strings-only
+```
+
+Apply structured edits without restoring yet:
 
 ```bash
 python obfuscator.py apply-llm-edits \
@@ -222,7 +227,10 @@ python obfuscator.py apply-llm-edits \
   --dry-run
 ```
 
-## 6. Validate And Restore
+## 6. Validate And Restore A Full Edited SQL File
+
+`restore-from-llm` expects structured edit JSON. If you have a full edited obfuscated SQL
+file instead, use the lower-level restoration commands.
 
 First run a dry check:
 

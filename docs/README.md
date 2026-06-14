@@ -21,6 +21,7 @@ history without interrupting normal usage documentation.
 
 - [ADR 0001: Keep LocalWorkspaceStore as the Current Storage Seam](adr/0001-local-workspace-store-storage-seam.md)
 - [ADR 0002: Add Explicit Qualifier Obfuscation](adr/0002-add-explicit-qualifier-obfuscation.md)
+- [ADR 0003: Add LLM Workflow Commands](adr/0003-add-llm-workflow-commands.md)
 - [LLM workflow architecture recommendations](maintainers/architecture/llm-workflow-recommendations-2026-03-22.md)
 - [Website hosting guardrails](maintainers/architecture/website-hosting-guardrails-2026-06-06.md)
 - [GUI implementation plan](maintainers/plans/gui-implementation-plan-2026-03-01.md)

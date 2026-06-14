@@ -33,13 +33,10 @@ These are the simplest external-LLM tasks because no edited SQL needs to be rest
 Recommended preparation:
 
 ```bash
-python obfuscator.py obfuscate script.sql \
-  --llm-safe \
-  --obfuscate-qualifiers \
-  --redaction-mode irreversible \
-  --redact-literals \
-  --strip-comments
+python obfuscator.py prepare-for-llm script.sql --irreversible
 ```
+
+Omit `--irreversible` when original literal values may need to be restored after edits.
 
 ## Small Restorable Edits
 
@@ -59,19 +56,13 @@ These tasks often fit the recommended structured-edit workflow:
 Ask the LLM to return statement replacements. Then run:
 
 ```bash
-python obfuscator.py apply-llm-edits \
+python obfuscator.py restore-from-llm \
   --workspace script.obf \
   --edits script.obf/llm_edits.json
-
-python obfuscator.py deobfuscate \
-  --workspace script.obf \
-  --input script.obf/llm_response_obfuscated.sql \
-  --dry-run
-
-python obfuscator.py validate-before-write \
-  --workspace script.obf \
-  --input script.obf/llm_response_obfuscated.sql
 ```
+
+Use `restore-from-llm --dry-run` when you want to check the edit payload and restoration
+safety before writing derived workflow outputs.
 
 ## Manual-Review Rewrites
 

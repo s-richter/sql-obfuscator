@@ -21,6 +21,8 @@ Available commands:
 
 | Command | Purpose |
 |---|---|
+| `prepare-for-llm` | Create LLM-sharing artifacts with recommended workflow defaults |
+| `restore-from-llm` | Apply bounded LLM edits, validate, and restore SQL |
 | `obfuscate` | Replace identifiers and create a workspace |
 | `apply-llm-edits` | Apply structured statement replacements returned by an LLM |
 | `deobfuscate` | Restore identifiers in edited obfuscated SQL |
@@ -85,6 +87,69 @@ When `--llm-safe` rejects a script, the workspace is still written for local ins
 the sibling SQL output file is not written. See
 [Sharing SQL With an External LLM](../guides/llm-sharing.md).
 
+## `prepare-for-llm`
+
+```bash
+python obfuscator.py prepare-for-llm <input.sql|-> [options]
+```
+
+This workflow command prepares the intended files for an external LLM. It applies the
+recommended external-sharing defaults:
+
+- reversible redaction
+- literal redaction
+- comment stripping
+- qualifier obfuscation
+- fail-closed validation
+
+Use `-` instead of a filename to read SQL from stdin.
+
+### Options
+
+| Option | Behavior |
+|---|---|
+| `--workspace <dir>` | Workspace folder. Defaults to `<input-stem>.obf` or `stdin.obf`. |
+| `--dialect <tsql|hive>` | SQL dialect. Defaults to `tsql`. |
+| `--seed <int>` | Use repeatable generated names. |
+| `--instruction-template <path>` | Replace the generated `llm_instructions.md` content with a custom Markdown template. |
+| `--irreversible` | Use irreversible redaction instead of the default reversible redaction. |
+| `--expert-mode` | Allow output that requires manual review instead of failing closed. |
+| `--print-sql` | Print obfuscated SQL after the workflow summary. |
+
+### Output
+
+For file input such as `script.sql`, the default workspace is:
+
+```text
+script.obf/
+```
+
+The command writes the workspace artifacts, including:
+
+```text
+script.obf/obfuscated.sql
+script.obf/llm_instructions.md
+script.obf/reports/privacy_summary.json
+script.obf/reports/llm_workflow_report.json
+```
+
+By default, it does not write a sibling `script_obfuscated.sql` file and does not print SQL
+to stdout. It prints a summary pointing to the files to send.
+
+The workflow defaults to reversible redaction so original literal values can be restored
+after LLM edits. Use `--irreversible` when original literal values do not need to be
+restored.
+
+### Exit Behavior
+
+- exit `0` when validation passes
+- exit `1` when fail-closed validation finds blockers
+- exit `0` with `--expert-mode` when blockers exist, after writing reports and marking the
+  output as requiring manual review
+
+Use lower-level `obfuscate` when you need custom redaction policy, `--stdout-only`,
+`--output-dir`, or other fine-grained output controls.
+
 ## `apply-llm-edits`
 
 ```bash
@@ -124,6 +189,56 @@ The edit file may contain raw JSON or a fenced `json` block. Required format:
 Each replacement must target a known statement ID and contain exactly one SQL statement.
 The generated names in the example are illustrative; copy the exact names from your
 `obfuscated.sql`. The default output cannot overwrite workspace `obfuscated.sql`.
+
+## `restore-from-llm`
+
+```bash
+python obfuscator.py restore-from-llm \
+  --workspace <dir> \
+  --edits <llm_edits.json> \
+  [options]
+```
+
+This workflow command applies structured bounded edit JSON, validates restoration, and
+writes restored SQL only when checks pass or are explicitly overridden.
+
+### Options
+
+| Option | Behavior |
+|---|---|
+| `--workspace <dir>` | Workspace created by `prepare-for-llm` or `obfuscate`. Required. |
+| `--edits <path>` | JSON edit payload returned by the LLM. Required. |
+| `--out <path>` | Restored output path. Defaults to `<workspace>/deobfuscated.sql`. |
+| `--dry-run` | Validate edits and restoration safety without writing workflow outputs. |
+| `--allow-unresolved` | Write output despite unresolved findings. |
+| `--allow-low-confidence` | Write output despite low-confidence findings. |
+
+`restore-from-llm` accepts structured edit JSON only. Use `validate-before-write` or
+`deobfuscate` when you need to restore a full edited obfuscated SQL file.
+
+### Output
+
+On success, the workflow writes:
+
+```text
+<workspace>/llm_response_obfuscated.sql
+<workspace>/deobfuscated.sql
+```
+
+It prints artifact paths and validation status, not the restored SQL body.
+
+`--out <path>` controls the final restored SQL path. The workspace still receives
+de-obfuscation reports and the applied obfuscated response remains at the workspace default
+path.
+
+### Exit Behavior
+
+- exit `0` when edit application and restoration validation pass
+- exit `1` when the edit payload is invalid
+- exit `1` when unresolved findings exist without `--allow-unresolved`
+- exit `1` when low-confidence findings exist without `--allow-low-confidence`
+- with `--dry-run`, exit `0` when the workflow would be restorable and exit `1` when it
+  would have unresolved or low-confidence findings
 
 ## `deobfuscate`
 
@@ -175,8 +290,9 @@ python obfuscator.py validate-before-write \
   [options]
 ```
 
-This is the recommended final restoration command after LLM edits. It runs validation first
-and writes restored SQL only when checks pass or are explicitly overridden.
+This lower-level command runs validation first and writes restored SQL only when checks pass
+or are explicitly overridden. Use it when you already have a full edited obfuscated SQL file
+instead of structured edit JSON.
 
 ### Options
 
@@ -281,6 +397,7 @@ PowerShell:
 
 ```powershell
 Get-Content script.sql | python obfuscator.py obfuscate -
+Get-Content script.sql | python obfuscator.py prepare-for-llm -
 Get-Content script.sql | python obfuscator.py roundtrip - --diff-report
 Get-Content script.sql | python obfuscator.py translate --input - --source-dialect tsql --target-dialect hive
 ```
@@ -289,6 +406,7 @@ POSIX shell:
 
 ```bash
 cat script.sql | python obfuscator.py obfuscate -
+cat script.sql | python obfuscator.py prepare-for-llm -
 cat script.sql | python obfuscator.py roundtrip - --diff-report
 cat script.sql | python obfuscator.py translate --input - --source-dialect tsql --target-dialect hive
 ```
