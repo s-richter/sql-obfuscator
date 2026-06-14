@@ -1575,6 +1575,157 @@ def test_cli_obfuscate_qualifiers_allows_llm_safe_custom_schema(tmp_path: Path, 
     assert "custom_schema_qualifiers" not in privacy_report["blocking_identifier_classes"]
 
 
+def test_cli_prepare_for_llm_creates_shareable_workspace_without_printing_sql(
+    tmp_path: Path,
+    capsys,
+):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text(
+        "SELECT UserId FROM sales.Users WHERE Status = 'secret'; -- local note",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Prepared LLM workflow workspace:" in captured.out
+    assert str(workspace) in captured.out
+    assert "Send these files:" in captured.out
+    assert str(workspace / "obfuscated.sql") in captured.out
+    assert str(workspace / "llm_instructions.md") in captured.out
+    assert "Redaction: reversible" in captured.out
+    assert "Validation: passed" in captured.out
+    assert "SELECT" not in captured.out
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (workspace / "obfuscated.sql").exists()
+    assert (workspace / "llm_instructions.md").exists()
+    assert (workspace / "redaction.json").exists()
+
+    obfuscated_sql = (workspace / "obfuscated.sql").read_text(encoding="utf-8")
+    assert "__SQL_OBFUSCATOR_STR_" in obfuscated_sql
+    assert "secret" not in obfuscated_sql
+    assert "local note" not in obfuscated_sql
+    assert "sales" not in obfuscated_sql
+
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    assert context["obfuscate_qualifiers"] is True
+    privacy_report = json.loads((workspace / "reports" / "privacy_summary.json").read_text(encoding="utf-8"))
+    assert privacy_report["llm_safe_blocked"] is False
+
+
+def test_cli_prepare_for_llm_irreversible_uses_one_way_redaction(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 'secret' AS Status;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(
+        [
+            "prepare-for-llm",
+            str(sql_file),
+            "--workspace",
+            str(workspace),
+            "--irreversible",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Redaction: irreversible" in captured.out
+    obfuscated_sql = (workspace / "obfuscated.sql").read_text(encoding="utf-8")
+    assert "<REDACTED_STR>" in obfuscated_sql
+    assert "__SQL_OBFUSCATOR_STR_" not in obfuscated_sql
+    assert (workspace / "redaction.json").exists() is False
+    context = json.loads((workspace / "context.json").read_text(encoding="utf-8"))
+    assert context["redaction_mode"] == "irreversible"
+
+
+def test_cli_prepare_for_llm_fails_closed_when_validation_blocks(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(["prepare-for-llm", str(sql_file), "--workspace", str(workspace)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "LLM-safe validation failed" in captured.err
+    assert "Prepared LLM workflow workspace:" not in captured.out
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (workspace / "obfuscated.sql").exists()
+    assert (workspace / "reports" / "privacy_summary.json").exists()
+    assert (workspace / "reports" / "llm_workflow_report.json").exists()
+
+
+def test_cli_prepare_for_llm_expert_mode_allows_manual_review_output(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("WAITFOR DELAY '00:00:01';\nSELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(
+        [
+            "prepare-for-llm",
+            str(sql_file),
+            "--workspace",
+            str(workspace),
+            "--expert-mode",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Manual review required before sharing." in captured.out
+    assert "Send only after review:" in captured.out
+    assert str(workspace / "reports" / "privacy_summary.json") in captured.out
+    assert str(workspace / "reports" / "llm_workflow_report.json") in captured.out
+    assert "Validation: manual-review-required" in captured.out
+    assert "fallback/raw passthrough" in captured.err
+    assert (tmp_path / "input_obfuscated.sql").exists() is False
+    assert (workspace / "obfuscated.sql").exists()
+
+
+def test_cli_prepare_for_llm_print_sql_emits_obfuscated_sql(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT UserId FROM Users;", encoding="utf-8")
+    workspace = tmp_path / "input.obf"
+
+    rc = main(
+        [
+            "prepare-for-llm",
+            str(sql_file),
+            "--workspace",
+            str(workspace),
+            "--print-sql",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Prepared LLM workflow workspace:" in captured.out
+    assert "SELECT" in captured.out
+    assert (workspace / "obfuscated.sql").read_text(encoding="utf-8").strip() in captured.out
+
+
+def test_cli_prepare_for_llm_rejects_lower_level_redaction_flags(tmp_path: Path, capsys):
+    sql_file = tmp_path / "input.sql"
+    sql_file.write_text("SELECT 1;", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(
+            [
+                "prepare-for-llm",
+                str(sql_file),
+                "--redaction-mode",
+                "irreversible",
+            ]
+        )
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments: --redaction-mode irreversible" in captured.err
+
+
 
 def test_cli_deobfuscate_updates_llm_workflow_report(tmp_path: Path, capsys):
     sql_file = tmp_path / "input.sql"
