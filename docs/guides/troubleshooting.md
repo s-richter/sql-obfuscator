@@ -15,8 +15,8 @@ python obfuscator.py workspace-info --workspace script.obf
 
 ### Meaning
 
-`obfuscate --llm-safe` or `roundtrip --llm-safe` found content that it could not approve for
-the recommended external-sharing workflow.
+`prepare-for-llm`, `obfuscate --llm-safe`, or `roundtrip --llm-safe` found content that it
+could not approve for the recommended external-sharing workflow.
 
 Common causes:
 
@@ -32,10 +32,11 @@ Common causes:
 1. Open `script.obf/reports/privacy_summary.json`.
 2. Check `blocking_identifier_classes`, `blockers`, and `identifier_surface`.
 3. Open `script.obf/reports/llm_workflow_report.json` for statement and redaction counts.
-4. Remove, isolate, manually review, or obfuscate the visible content. Use
-   `--obfuscate-qualifiers` for custom schema and catalog/database qualifiers on table
-   references, column references, and qualified function calls.
-5. Run `obfuscate --llm-safe` again before external sharing.
+4. Remove, isolate, manually review, or obfuscate the visible content. Lower-level
+   `obfuscate` workflows can use `--obfuscate-qualifiers` for custom schema and
+   catalog/database qualifiers on table references, column references, and qualified
+   function calls.
+5. Run `prepare-for-llm` again before external sharing.
 
 The workspace is still written locally for diagnosis. Do not share the workspace folder.
 
@@ -54,8 +55,8 @@ Notice: sqlglot used fallback parsing for 1 statement(s) ...
 Some advanced procedural T-SQL constructs use a compatibility path. A notice alone does not
 mean local obfuscation or roundtrip failed.
 
-For external sharing, `--llm-safe` rejects these copied-through statements because the tool
-cannot confirm that their contents were fully sanitized.
+For external sharing, fail-closed validation rejects these copied-through statements because
+the tool cannot confirm that their contents were fully sanitized.
 
 ### What To Do
 
@@ -83,8 +84,9 @@ may have renamed a generated identifier or introduced a new table or column.
 
 1. Compare edited SQL with `obfuscated.sql`.
 2. Ask the LLM to preserve generated names.
-3. Prefer `apply-llm-edits` so untouched statements remain unchanged.
-4. Run `deobfuscate --dry-run` again.
+3. Prefer `restore-from-llm` or `apply-llm-edits` so untouched statements remain unchanged.
+4. Run `restore-from-llm --dry-run` for structured edit JSON, or `deobfuscate --dry-run`
+   for a full edited SQL file.
 5. Use `--allow-unresolved` only after manual review.
 
 ## Ambiguous Identifiers
@@ -127,7 +129,8 @@ The tool found a likely restoration match, but structural changes reduced its co
 
 1. Inspect the edited statement.
 2. Reduce structural changes where possible.
-3. Run `deobfuscate --dry-run` again.
+3. Run `restore-from-llm --dry-run` for structured edit JSON, or `deobfuscate --dry-run`
+   for a full edited SQL file.
 4. Use `--allow-low-confidence` only after manual review.
 
 ## Reversible-Redaction Placeholders Are Unresolved
@@ -156,7 +159,8 @@ redaction.
 1. Compare the edited SQL with `obfuscated.sql`.
 2. Restore the exact placeholder text where appropriate.
 3. Ask the LLM to preserve placeholders exactly.
-4. Run `deobfuscate --dry-run` again.
+4. Run `restore-from-llm --dry-run` for structured edit JSON, or `deobfuscate --dry-run`
+   for a full edited SQL file.
 
 ## Integrity Check Failed
 
@@ -177,7 +181,7 @@ metadata when present.
 
 Do not edit checksum metadata to bypass the failure.
 
-## `apply-llm-edits` Failed
+## Structured LLM Edit Application Failed
 
 ### Common Causes
 
@@ -193,7 +197,7 @@ Do not edit checksum metadata to bypass the failure.
 1. Read `script.obf/llm_instructions.md`.
 2. Check that the LLM returned the `statement_replacements` JSON format.
 3. Confirm each `sql` value contains exactly one obfuscated SQL statement.
-4. Re-run `obfuscate` if the workspace was created by an older version.
+4. Re-run `prepare-for-llm` or `obfuscate` if the workspace was created by an older version.
 
 ## Strict `GO` Validation Failed
 

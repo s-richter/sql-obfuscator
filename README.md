@@ -69,32 +69,22 @@ python obfuscator.py obfuscate script.sql --seed 42
 Use this command before sending SQL outside your environment:
 
 ```bash
-python obfuscator.py obfuscate script.sql \
-  --llm-safe \
-  --obfuscate-qualifiers \
-  --redaction-mode irreversible \
-  --redact-literals \
-  --strip-comments
+python obfuscator.py prepare-for-llm script.sql
 ```
 
 This replaces identifiers, obfuscates custom schema and catalog/database qualifiers on table
-references, column references, and qualified function calls, removes comments, and sanitizes
-string and numeric values.
-`--llm-safe` adds a final check. It stops with an error when the tool cannot confirm that the
-generated SQL is suitable for the recommended external-sharing workflow. For example, it
-rejects statements that could not be fully obfuscated and higher-risk names that remain
-visible.
+references, column references, and qualified function calls, removes comments, redacts string
+and numeric values, and runs fail-closed validation. `prepare-for-llm` defaults to reversible
+redaction so edited SQL can be restored with original literal values later.
 
 | Flag | Purpose |
 | ---- | ------- |
-| `--llm-safe` | Stop with an error when statements were copied through without full obfuscation or known higher-risk visible names remain. |
-| `--obfuscate-qualifiers` | Obfuscate custom schema qualifiers and catalog/database qualifiers on table references, column references, and qualified function calls. |
-| `--redaction-mode irreversible` | Use one-way redaction so original literal values are not stored for restoration. |
-| `--redact-literals` | Sanitize string and numeric values. |
-| `--strip-comments` | Remove SQL comments from the generated external-sharing script. |
+| `--irreversible` | Use one-way redaction when original literal values do not need to be restored. |
+| `--expert-mode` | Allow output that automatic validation cannot approve; review generated reports before sharing. |
+| `--print-sql` | Print obfuscated SQL to stdout after the workflow summary. |
 
-Important: `--llm-safe` is a validation check, not a redaction preset. Use
-`--redact-literals` and `--strip-comments` when preparing SQL for sharing.
+For custom redaction policies or unusual output modes, use the lower-level `obfuscate`
+command with explicit flags.
 
 If the command succeeds, send only:
 
@@ -109,25 +99,22 @@ For the full workflow, redaction choices, and an explanation of safety errors, r
 ## Restore Edited SQL
 
 For LLM-assisted edits, ask the model to return the structured statement replacements
-described in `script.obf/llm_instructions.md`. Then apply, check, and restore the result:
+described in `script.obf/llm_instructions.md`. Then restore the result:
 
 ```bash
-python obfuscator.py apply-llm-edits \
+python obfuscator.py restore-from-llm \
   --workspace script.obf \
   --edits script.obf/llm_edits.json
-
-python obfuscator.py deobfuscate \
-  --workspace script.obf \
-  --input script.obf/llm_response_obfuscated.sql \
-  --dry-run
-
-python obfuscator.py validate-before-write \
-  --workspace script.obf \
-  --input script.obf/llm_response_obfuscated.sql
 ```
 
-The dry run checks whether names can still be restored reliably. The final command writes
-`script.obf/deobfuscated.sql` only when validation passes.
+This applies the structured statement-replacement JSON, where each edit targets a known
+statement ID and leaves unrelated statements untouched. The command writes
+`script.obf/llm_response_obfuscated.sql`, validates restoration, and writes
+`script.obf/deobfuscated.sql` only when validation passes. Use `restore-from-llm --dry-run`
+to validate the full workflow without writing derived outputs.
+
+Lower-level `apply-llm-edits`, `deobfuscate`, and `validate-before-write` commands remain
+available for custom workflows and direct edited-SQL restoration.
 
 ## Translate SQL
 
@@ -167,8 +154,8 @@ integrity checks.
 
 - Some advanced procedural T-SQL constructs cannot be fully transformed. The tool may copy
   those statements through without full obfuscation and print a parser fallback notice.
-- Use `--llm-safe` before external sharing. It rejects statements copied through without
-  full obfuscation and known higher-risk visible names, but it is not a complete
+- Use `prepare-for-llm` before external sharing. It rejects statements copied through
+  without full obfuscation and known higher-risk visible names, but it is not a complete
   confidentiality guarantee.
 - `--obfuscate-qualifiers` covers qualifier names, not function names. User-defined or
   unknown function names may still remain visible.

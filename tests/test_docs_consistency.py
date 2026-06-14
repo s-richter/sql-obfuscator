@@ -29,12 +29,15 @@ def test_cli_reference_mentions_key_cli_flags():
     assert "## Current Limits" in readme_text
 
 
-def test_readme_external_llm_example_describes_redaction_mode_flag():
+def test_readme_external_llm_example_uses_workflow_commands():
     root = Path(__file__).resolve().parents[1]
     readme_text = (root / "README.md").read_text(encoding="utf-8")
 
-    assert "`--redaction-mode irreversible`" in readme_text
-    assert "original literal values are not stored for restoration" in readme_text
+    assert "python obfuscator.py prepare-for-llm script.sql" in readme_text
+    assert "python obfuscator.py restore-from-llm" in readme_text
+    assert "defaults to reversible" in readme_text
+    assert "redaction so edited SQL can be restored" in readme_text
+    assert "`--irreversible`" in readme_text
 
 
 def test_cli_reference_and_cli_help_match_recent_flags():
@@ -42,6 +45,8 @@ def test_cli_reference_and_cli_help_match_recent_flags():
     reference_text = (root / "docs" / "reference" / "cli.md").read_text(encoding="utf-8")
 
     checks = {
+        "prepare-for-llm": ("--irreversible", "--expert-mode", "--print-sql"),
+        "restore-from-llm": ("--edits", "--dry-run", "--allow-low-confidence"),
         "obfuscate": ("--strict-go", "--obfuscate-qualifiers", "--stdout-only", "--output-dir"),
         "roundtrip": ("--diff-report", "--obfuscate-qualifiers", "--stdout-only", "--output-dir"),
         "translate": ("--report-only", "--stdout-only", "--output-dir"),
@@ -88,6 +93,7 @@ def test_docs_index_links_to_storage_seam_decision():
     docs_index = (root / "docs" / "README.md").read_text(encoding="utf-8")
     adr_0001 = root / "docs" / "adr" / "0001-local-workspace-store-storage-seam.md"
     adr_0002 = root / "docs" / "adr" / "0002-add-explicit-qualifier-obfuscation.md"
+    adr_0003 = root / "docs" / "adr" / "0003-add-llm-workflow-commands.md"
 
     assert "ADR 0001" in docs_index
     assert "adr/0001-local-workspace-store-storage-seam.md" in docs_index
@@ -95,6 +101,9 @@ def test_docs_index_links_to_storage_seam_decision():
     assert "ADR 0002" in docs_index
     assert "adr/0002-add-explicit-qualifier-obfuscation.md" in docs_index
     assert adr_0002.exists()
+    assert "ADR 0003" in docs_index
+    assert "adr/0003-add-llm-workflow-commands.md" in docs_index
+    assert adr_0003.exists()
 
 
 def test_website_hosting_guardrails_are_recorded_as_durable_architecture_doc():
