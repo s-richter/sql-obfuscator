@@ -1,0 +1,2 @@
+# Test scripts are compared byte for byte; never let git change their line endings.
+tests/scripts/** -text
