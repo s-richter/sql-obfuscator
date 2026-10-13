@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL Obfuscator Milestone 0</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column on cool paper; figures and tables sit in the same column and
+   scroll sideways on their own when they must. File paths are the section metadata. */
+:root {
+  --bg: #F1F4F6;
+  --surface: #FFFFFF;
+  --ink: #15202B;
+  --muted: #55636F;
+  --rule: #D3DAE0;
+  --code-bg: #E6EBEF;
+  --accent: #0A6A73;
+  --accent-soft: #D9ECEE;
+  --warn: #9A4E14;
+  --warn-soft: #F5E6D6;
+  --ok: #26683A;
+  --ok-soft: #DDEFE2;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-head: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F151B; --surface: #172029; --ink: #E3E8ED; --muted: #98A6B2; --rule: #2A3641;
+    --code-bg: #1D2832; --accent: #5FC4CE; --accent-soft: #11333A; --warn: #E3A368;
+    --warn-soft: #38281A; --ok: #82C795; --ok-soft: #16301F; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F151B; --surface: #172029; --ink: #E3E8ED; --muted: #98A6B2; --rule: #2A3641;
+  --code-bg: #1D2832; --accent: #5FC4CE; --accent-soft: #11333A; --warn: #E3A368;
+  --warn-soft: #38281A; --ok: #82C795; --ok-soft: #16301F; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 400 1rem/1.6 var(--font-body);
+  padding-inline: 1.25rem; padding-block: 2.5rem 4rem;
+}
+main { max-width: 46rem; margin-inline: auto; display: flex; flex-direction: column; gap: 3.25rem; }
+section, header { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+h1, h2, h3 { font-family: var(--font-head); font-weight: 600; line-height: 1.2; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.45rem; }
+h3 { font-size: 1.05rem; font-family: var(--font-body); }
+p, ul, ol, dl, figure, table { margin: 0; }
+p { max-width: 65ch; }
+a { color: var(--accent); text-underline-offset: 0.15em; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 0.08em 0.32em; border-radius: 3px; overflow-wrap: anywhere; }
+.eyebrow { font: 500 0.74rem/1.3 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.12rem; line-height: 1.55; }
+.meta { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; color: var(--muted); font-size: 0.9rem; }
+.meta b { color: var(--ink); font-weight: 500; }
+.path { font: 400 0.8rem/1.3 var(--font-mono); color: var(--muted); }
+
+ul.plain, ol.plain { padding-left: 1.15rem; display: flex; flex-direction: column; gap: 0.45rem; max-width: 65ch; }
+
+/* tables */
+.scroll { overflow-x: auto; }
+.scroll > table { min-width: 36rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.9rem 0.55rem 0; border-bottom: 1px solid var(--rule); }
+th { font: 500 0.74rem/1.3 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+
+/* evidence figures */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 1.1rem 1.5rem;
+  border-block: 1px solid var(--rule); padding-block: 1.1rem; }
+.facts div { display: flex; flex-direction: column; gap: 0.15rem; }
+.facts dt { order: 2; color: var(--muted); font-size: 0.86rem; line-height: 1.35; }
+.facts dd { order: 1; margin: 0; font: 600 1.7rem/1.1 var(--font-head); font-variant-numeric: tabular-nums; }
+.facts dd small { font: 400 0.95rem var(--font-body); color: var(--muted); }
+
+/* figures */
+figure { display: flex; flex-direction: column; gap: 0.7rem; }
+figcaption { color: var(--muted); font-size: 0.88rem; max-width: 65ch; }
+.fig { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 0.75rem; }
+.fig svg { display: block; width: 100%; min-width: 44rem; height: auto; color: var(--ink); }
+.fig text { fill: currentColor; font-family: var(--font-body); font-size: 12.5px; }
+.fig .zone { fill: var(--bg); stroke: var(--rule); }
+.fig .zone-label { font: 500 10.5px var(--font-mono); letter-spacing: 0.08em; fill: var(--muted); }
+.fig .box { fill: var(--surface); stroke: var(--muted); stroke-width: 1.2; }
+.fig .box-title { font-weight: 600; }
+.fig .sub { fill: var(--muted); font-size: 11.5px; }
+.fig .flow { stroke: currentColor; stroke-width: 1.4; fill: none; }
+.fig .cross { stroke: var(--accent); stroke-width: 2.2; fill: none; }
+.fig .cross-label { fill: var(--accent); font-weight: 600; }
+.fig .mk { fill: currentColor; }
+.fig .mk-cross { fill: var(--accent); }
+
+/* token chips */
+.tokens { display: flex; flex-direction: column; gap: 1rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem; }
+.tokens .row { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+.tokens .src { font: 400 0.86rem/1.5 var(--font-mono); background: var(--code-bg); border-radius: 4px; padding: 0.5rem 0.7rem; white-space: pre; overflow-x: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.chip { display: inline-flex; flex-direction: column; gap: 0.1rem; padding: 0.3rem 0.55rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--bg); min-width: 0; }
+.chip i { font: 500 0.64rem/1.2 var(--font-mono); font-style: normal; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.chip span { font: 500 0.88rem/1.3 var(--font-mono); overflow-wrap: anywhere; }
+.chip.bad { background: var(--warn-soft); border-color: var(--warn); }
+.chip.bad i { color: var(--warn); }
+.chip.good { background: var(--accent-soft); border-color: var(--accent); }
+.chip.good i { color: var(--accent); }
+.verdict { font-size: 0.9rem; color: var(--muted); }
+.verdict b { color: var(--ink); font-weight: 600; }
+
+/* timeline */
+ol.steps { list-style: none; padding: 0; display: flex; flex-direction: column; }
+ol.steps li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0 1.1rem; padding-block: 0.9rem; border-top: 1px solid var(--rule); }
+ol.steps li:last-child { border-bottom: 1px solid var(--rule); }
+ol.steps .when { font: 500 0.76rem/1.5 var(--font-mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding-top: 0.15rem; }
+ol.steps .what { display: flex; flex-direction: column; gap: 0.35rem; }
+ol.steps .turn { font-size: 0.9rem; color: var(--warn); }
+@media (max-width: 34rem) { ol.steps li { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; } }
+
+/* reflections */
+.reflect { display: flex; flex-direction: column; gap: 1.6rem; }
+.reflect article { display: flex; flex-direction: column; gap: 0.5rem; }
+.reflect dl { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 0.4rem 1.1rem; font-size: 0.95rem; }
+.reflect dt { font: 500 0.74rem/1.7 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.reflect dd { margin: 0; max-width: 60ch; }
+@media (max-width: 34rem) { .reflect dl { grid-template-columns: minmax(0, 1fr); gap: 0.1rem; } .reflect dd { margin-bottom: 0.4rem; } }
+
+/* milestone track */
+.track { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 0.5rem; }
+.track li { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.65rem 0.75rem; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); font-size: 0.88rem; line-height: 1.35; }
+.track .n { font: 500 0.72rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.track b { font-weight: 600; font-size: 0.95rem; }
+.track .done { background: var(--ok-soft); border-color: var(--ok); }
+.track .done .n { color: var(--ok); }
+.track .next { border-color: var(--accent); border-width: 2px; }
+.track .next .n { color: var(--accent); }
+.track .parked { border-style: dashed; background: transparent; }
+
+.note { border-left: 3px solid var(--warn); padding: 0.1rem 0 0.1rem 0.9rem; color: var(--ink); max-width: 65ch; }
+footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--rule); padding-top: 1rem; }
+</style>
+<style>img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">SQL Obfuscator · retrospective</div>
+  <h1>Milestone 0: Foundation</h1>
+  <p class="lede">Milestone 0 produced no working obfuscation. It produced the decisions the engine will be built on, the evidence behind them, and the scripts and tests that milestone 1 has to pass.</p>
+  <div class="meta">
+    <span><b>When</b> 12 to 13 October 2026</span>
+    <span><b>Repo</b> <a href="https://github.com/s-richter/sql-obfuscator">s-richter/sql-obfuscator</a> (private)</span>
+    <span><b>Commits</b> <span class="mono">903a039</span>, pull request <a href="https://github.com/s-richter/sql-obfuscator/pull/1">#1</a></span>
+    <span><b>Status</b> merged, CI passing</span>
+  </div>
+</header>
+
+<section>
+  <h2>What exists now</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Part</th><th>Where</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td>Glossary</td><td><code>CONTEXT.md</code></td><td>21 terms. "Original", "formatted", "obfuscated" and "deobfuscated" script; engine, name, fake name, placeholder, mapping, keep-list, ban-list, workspace, bundle and more.</td></tr>
+      <tr><td>Decision records</td><td><code>docs/adr/</code></td><td>Seven decisions with the alternatives that were rejected and why.</td></tr>
+      <tr><td>User-facing rules</td><td><code>docs/reference/what-gets-replaced.md</code></td><td>Exactly what an obfuscated script hides and what it still shows, including the number rule and its limits.</td></tr>
+      <tr><td>Plan</td><td><code>docs/milestones.md</code></td><td>Eight milestones, what is decided later on purpose, and the four checks.</td></tr>
+      <tr><td>Test scripts</td><td><code>tests/scripts/</code></td><td>49 scripts, 10,240 lines: 28 from the earlier tool and 21 new ones (15 T-SQL, 6 Hive).</td></tr>
+      <tr><td>Word lists</td><td><code>src/sql_obfuscator/wordlists/</code></td><td>231 adjectives and 249 animals, 57,519 pairs. None is a SQL keyword or built-in function; none suggests a meaning for the data.</td></tr>
+      <tr><td>Tokenizer wrapper</td><td><code>src/sql_obfuscator/tokens.py</code></td><td>The only real code: sqlglot's tokenizer with command mode switched off.</td></tr>
+      <tr><td>Command line</td><td><code>src/sql_obfuscator/cli.py</code></td><td>A skeleton. <code>sqlobf</code> has its five commands, and each one only reports that it is not implemented yet.</td></tr>
+      <tr><td>Tests and CI</td><td><code>tests/</code>, <code>.github/workflows/ci.yml</code></td><td>192 tests, lint and format checks on every push and pull request.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>The design we agreed on</h2>
+  <p>A script passes through four states on your machine. Only the obfuscated one may be shown to an LLM. The mapping records every replacement and is what turns a response back into real names.</p>
+  <figure>
+    <div class="fig scroll">
+      <svg viewBox="0 0 940 372" role="img" aria-label="Only the bundle and the response cross between your machine and the LLM provider. The original script, the formatted script and the mapping stay in the workspace.">
+        <defs>
+          <marker id="m0-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0 0 L10 5 L0 10 Z"></path></marker>
+          <marker id="m0-arrow-cross" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path class="mk-cross" d="M0 0 L10 5 L0 10 Z"></path></marker>
+        </defs>
+        <rect class="zone" x="8" y="28" width="614" height="336" rx="10"></rect>
+        <text class="zone-label" x="26" y="54">YOUR MACHINE · WORKSPACE (.OBF)</text>
+        <rect class="zone" x="702" y="28" width="230" height="336" rx="10"></rect>
+        <text class="zone-label" x="720" y="54">LLM PROVIDER</text>
+
+        <rect class="box" x="30" y="84" width="140" height="52" rx="6"></rect>
+        <text class="box-title" x="100" y="115" text-anchor="middle">Original script</text>
+        <rect class="box" x="225" y="84" width="140" height="52" rx="6"></rect>
+        <text class="box-title" x="295" y="115" text-anchor="middle">Formatted script</text>
+        <rect class="box" x="440" y="84" width="140" height="52" rx="6"></rect>
+        <text class="box-title" x="510" y="115" text-anchor="middle">Obfuscated script</text>
+
+        <rect class="box" x="440" y="188" width="140" height="52" rx="6"></rect>
+        <text class="box-title" x="510" y="210" text-anchor="middle">Mapping</text>
+        <text class="sub" x="510" y="227" text-anchor="middle">the secret</text>
+
+        <rect class="box" x="440" y="292" width="140" height="52" rx="6"></rect>
+        <text class="box-title" x="510" y="314" text-anchor="middle">Deobfuscated</text>
+        <text class="box-title" x="510" y="331" text-anchor="middle">response</text>
+
+        <rect class="box" x="732" y="84" width="170" height="52" rx="6"></rect>
+        <text class="box-title" x="817" y="106" text-anchor="middle">Works on the</text>
+        <text class="box-title" x="817" y="123" text-anchor="middle">obfuscated script</text>
+        <rect class="box" x="732" y="292" width="170" height="52" rx="6"></rect>
+        <text class="box-title" x="817" y="323" text-anchor="middle">Response</text>
+
+        <line class="flow" x1="170" y1="110" x2="223" y2="110" marker-end="url(#m0-arrow)"></line>
+        <text x="197" y="101" text-anchor="middle">format</text>
+        <line class="flow" x1="365" y1="110" x2="438" y2="110" marker-end="url(#m0-arrow)"></line>
+        <text x="402" y="101" text-anchor="middle">obfuscate</text>
+
+        <line class="cross" x1="580" y1="110" x2="729" y2="110" marker-end="url(#m0-arrow-cross)"></line>
+        <text class="cross-label" x="662" y="101" text-anchor="middle">bundle</text>
+        <line class="flow" x1="817" y1="136" x2="817" y2="290" marker-end="url(#m0-arrow)"></line>
+        <text x="827" y="218">answers</text>
+        <line class="cross" x1="732" y1="318" x2="583" y2="318" marker-end="url(#m0-arrow-cross)"></line>
+        <text class="cross-label" x="662" y="309" text-anchor="middle">response</text>
+
+        <line class="flow" x1="510" y1="136" x2="510" y2="186" marker-end="url(#m0-arrow)"></line>
+        <text x="499" y="166" text-anchor="end">records each replacement</text>
+        <line class="flow" x1="510" y1="240" x2="510" y2="290" marker-end="url(#m0-arrow)"></line>
+        <text x="499" y="270" text-anchor="end">restores real names</text>
+
+        <text class="sub" x="30" y="312">Never cross the boundary:</text>
+        <text class="sub" x="30" y="330">original script, formatted script, mapping.</text>
+      </svg>
+    </div>
+    <figcaption>Two things cross the boundary: the bundle going out (instructions, your task and the obfuscated script) and the response coming back. Nothing in this figure is built yet; it is the design milestones 1 and 3 implement.</figcaption>
+  </figure>
+  <ul class="plain">
+    <li><b>Names</b> become an adjective and an animal, such as <code>frozen_lion</code>. Qualified names are replaced part by part, and the fake name follows the casing of the original.</li>
+    <li><b>Strings</b> become numbered placeholders such as <code>'text_017'</code>. <b>Numbers</b> are kept unless you switch number obfuscation on.</li>
+    <li><b>Comments</b> become markers such as <code>/* c12 */</code> and are put back afterwards.</li>
+    <li><b>Four checks</b> run on every obfuscation: round-trip, leak, structure and ban-list. If one fails, nothing is written, and there is no override.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>The decision everything else rests on</h2>
+  <div class="path">docs/adr/0001-token-first-engine.md</div>
+  <p>You asked for sqlglot for robustness. For plain queries its parser is robust. For stored procedures, which are 20 to 30 percent of your scripts, it fails in three different ways, and two of them are silent.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>What the parser does</th><th>Examples</th><th>Consequence for obfuscation</th></tr></thead>
+    <tbody>
+      <tr><td>Refuses the script</td><td><code>GO</code>, <code>THROW</code>, <code>IF … ELSE</code> around <code>UPDATE</code></td><td>Loud and safe, but most procedures would be rejected.</td></tr>
+      <tr><td>Treats a block as opaque text</td><td><code>TRY/CATCH</code>, cursors, triggers</td><td>Names inside are invisible to the syntax tree and would pass through unobfuscated.</td></tr>
+      <tr><td>Rewrites into invalid SQL without an error</td><td><code>IF @x IS NULL SET @x = 1</code> becomes <code>IF @x IS NULL AS SET BEGIN @x = 1</code></td><td>Corrupted output that no idempotence check or name comparison detects.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>So the engine renames on the token stream. Every name that is not on the keep-list is replaced, which means a mistake produces too much obfuscation and never a leak. The parser is used only for pretty-printing statements it handles safely.</p>
+  <p>The tokenizer had a trap of its own, which I found only when running your 28 sample scripts. After certain words it stops splitting the text and swallows the rest of the statement as one string:</p>
+  <figure>
+    <div class="tokens">
+      <div class="row">
+        <div class="src">GO
+SELECT a FROM secret_table</div>
+      </div>
+      <div class="row">
+        <div class="eyebrow">sqlglot as shipped</div>
+        <div class="chips">
+          <div class="chip"><i>command</i><span>GO</span></div>
+          <div class="chip bad"><i>string</i><span>SELECT a FROM secret_table</span></div>
+        </div>
+        <div class="verdict"><b>The whole query is one string.</b> With strings kept it passes through unobfuscated. With strings replaced it becomes a single useless placeholder.</div>
+      </div>
+      <div class="row">
+        <div class="eyebrow">with command mode off · sql_obfuscator.tokens</div>
+        <div class="chips">
+          <div class="chip"><i>name</i><span>GO</span></div>
+          <div class="chip"><i>keyword</i><span>SELECT</span></div>
+          <div class="chip"><i>name</i><span>a</span></div>
+          <div class="chip"><i>keyword</i><span>FROM</span></div>
+          <div class="chip good"><i>name</i><span>secret_table</span></div>
+        </div>
+        <div class="verdict"><b><code>secret_table</code> is its own token</b> and gets a fake name. <code>GO</code> stays because it will be on the keep-list.</div>
+      </div>
+    </div>
+    <figcaption>The same two lines tokenized both ways. This happened 30 times in the earlier sample scripts, once to a query of 1,571 characters. Both behaviours are pinned in <code>tests/test_tokens.py</code>.</figcaption>
+  </figure>
+  <h3>Evidence from the 28 earlier sample scripts</h3>
+  <dl class="facts">
+    <div><dt>scripts with an exact round-trip in a throwaway token-level test</dt><dd>28 <small>of 28</small></dd></div>
+    <div><dt>scripts that sqlglot's parser can read at all</dt><dd>19 <small>of 28</small></dd></div>
+    <div><dt>names leaked in that test (2,518 names, 976 values replaced)</dt><dd>0</dd></div>
+    <div><dt>regions swallowed by command mode before it was switched off</dt><dd>30</dd></div>
+  </dl>
+  <p class="note">The throwaway test was about 60 lines, had no keep-list, and is not in the repo. It showed that the approach can work. Milestone 1 has to reproduce the result with real code.</p>
+</section>
+
+<section>
+  <h2>How we got here</h2>
+  <p>The design was settled in four rounds of questions, 33 in all, each with a recommendation. Building started only after you confirmed a shared understanding.</p>
+  <ol class="steps">
+    <li><div class="when">Before round 1</div><div class="what"><div>Read your requirements and probed sqlglot on representative T-SQL and Hive.</div><div class="turn">Finding: the parser cannot carry stored procedures.</div></div></li>
+    <li><div class="when">Round 1 · Q1–10</div><div class="what"><div>Threat model, token-first engine, per-part mapping in one namespace, strings replaced and numbers kept, comment markers, the bundle, one workspace model, terminology.</div><div>Your input: 20 to 30 percent procedures with <code>GO</code>; multi-user and auto-update are commitments, not options.</div></div></li>
+    <li><div class="when">Round 2 · Q11–20</div><div class="what"><div>Best-effort formatting, a stored mapping that only grows, numbered placeholders, keep-list, workspace layout, commands and flags, checks that cannot be overridden, ban-list matching, stack.</div><div class="turn">Finding: comparing names before and after formatting does not catch the silent rewrites.</div></div></li>
+    <li><div class="when">Round 3 · Q21–29</div><div class="what"><div>The earlier attempt, bundle instructions, response handling, task text, harmless values, test plan, what the later milestones mean, milestone order.</div><div>Your input: the earlier tool failed because its command line and handling grew too complicated.</div></div></li>
+    <li><div class="when">Earlier repo</div><div class="what"><div>Read <code>sql-obfuscator_deprecated</code> and ran its 28 scripts through a throwaway token-level rename.</div><div class="turn">Correction: I had said the tokenizer handles everything. It does only with command mode off.</div></div></li>
+    <li><div class="when">Round 4 · Q30–33</div><div class="what"><div>Four rules for a small command line and five commands, the number rule, smaller defaults, confirmation.</div><div>Your input: the number rule has to be documented clearly.</div></div></li>
+    <li><div class="when">Build</div><div class="what"><div>Docs, word lists, 21 new scripts, tokenizer wrapper, command-line skeleton, tests, CI. One commit, <span class="mono">903a039</span>.</div><div class="turn">Correction: <code>IF … ELSE</code> is not always rejected by the parser; some forms are silently rewritten.</div></div></li>
+    <li><div class="when">Next day</div><div class="what"><div>Pull request #1: the structure check was in the plan but missing from two documents.</div></div></li>
+  </ol>
+</section>
+
+<section>
+  <h2>Decisions on record</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th class="num">No.</th><th>Decision</th><th>Main reason</th></tr></thead>
+    <tbody>
+      <tr><td class="num">0001</td><td>The engine renames on the token stream, not the syntax tree.</td><td>The parser leaks or corrupts procedural T-SQL.</td></tr>
+      <tr><td class="num">0002</td><td>We protect names and values, not structure. Four checks, no override.</td><td>The LLM needs the structure to be useful.</td></tr>
+      <tr><td class="num">0003</td><td>Names map per part, in one case-insensitive namespace.</td><td>The engine never has to know what kind of thing a name is.</td></tr>
+      <tr><td class="num">0004</td><td>The stored mapping is the source of truth and only grows.</td><td>Names stay stable when originals change, which auto-update needs.</td></tr>
+      <tr><td class="num">0005</td><td>Formatting is best-effort and limited to safe statement types.</td><td>An allow-list is the only gate that stops silent rewrites.</td></tr>
+      <tr><td class="num">0006</td><td>Five commands, independent flags, no safety switches.</td><td>The earlier tool became too complicated to use.</td></tr>
+      <tr><td class="num">0007</td><td>Numbers are replaced by size, not by position.</td><td>Tokens cannot tell a threshold from a row limit.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Hazards found while writing the test scripts</h2>
+  <p>Each of these surfaced before any engine code existed, which is the point of writing the scripts first.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Hazard</th><th>Script</th><th class="num">Milestone</th></tr></thead>
+    <tbody>
+      <tr><td>A name inside a Hive hint such as <code>/*+ MAPJOIN(b) */</code> is not seen as a name. Left alone it would leak.</td><td class="num">54</td><td class="num">2</td></tr>
+      <tr><td>A money value such as <code>$1250.75</code> is split into a name, a dot and a number.</td><td class="num">37</td><td class="num">1</td></tr>
+      <tr><td><code>$action</code>, <code>inserted</code> and <code>deleted</code> look like ordinary names and belong on the keep-list.</td><td class="num">33, 36</td><td class="num">1</td></tr>
+      <tr><td>Files can start with a byte order mark and use Windows line endings. Both must survive a round-trip.</td><td class="num">43, 44</td><td class="num">1</td></tr>
+      <tr><td>Hive number suffixes such as <code>100L</code> produce extra tokens that overlap the number.</td><td class="num">55</td><td class="num">2</td></tr>
+      <tr><td>Hive <code>SET</code> keys and <code>ADD JAR</code> paths are tokenized as names.</td><td class="num">53</td><td class="num">2</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>What I would do differently</h2>
+  <p>Six things, in order of how much they cost.</p>
+  <div class="reflect">
+    <article>
+      <h3>1. Ask about earlier attempts in the first round</h3>
+      <dl>
+        <dt>Happened</dt><dd>I found <code>sql-obfuscator_deprecated</code> by accident after round 2, while checking GitHub access, and asked about it in round 3.</dd>
+        <dt>Cost</dt><dd>I recommended the token-first engine before testing it on 9,689 lines of your own scripts, and I proposed six commands in round 2 before hearing that complexity sank the earlier tool. One command was cut again in round 4.</dd>
+        <dt>Instead</dt><dd>First question of round 1: "Has this been tried before, and what do you have from it?"</dd>
+      </dl>
+    </article>
+    <article>
+      <h3>2. Put a claim in a test before putting it in a decision record</h3>
+      <dl>
+        <dt>Happened</dt><dd>Two statements in decision record 0001 were wrong as first written. "The tokenizer handled every construct" came from a probe that never put <code>GO</code>, <code>FETCH</code> or <code>PRINT</code> at the start of a statement. "<code>IF … ELSE</code> is rejected" generalised from one example.</dd>
+        <dt>Cost</dt><dd>Two corrections to you, and a recommendation that was right for a reason I had not fully checked.</dd>
+        <dt>Instead</dt><dd>Write <code>tests/test_sqlglot_assumptions.py</code> first and let a decision record say only what a test shows. That file exists now; it should have existed before round 1 ended.</dd>
+      </dl>
+    </article>
+    <article>
+      <h3>3. Show you real output before asking you to agree to rules</h3>
+      <dl>
+        <dt>Happened</dt><dd>Each round had about ten questions and nearly every answer was "agree".</dd>
+        <dt>Cost</dt><dd>Unknown, which is the problem. The recommendations may have been right, or the questions may have been too abstract to disagree with. You have not yet seen what <code>Frozen_Lion</code> and <code>'text_017'</code> look like across a 500-line procedure.</dd>
+        <dt>Instead</dt><dd>Obfuscate one of your sample scripts with the throwaway version in round 1 and put the result in front of you. It took minutes to write.</dd>
+      </dl>
+    </article>
+    <article>
+      <h3>4. Try the number rule before recording it as accepted</h3>
+      <dl>
+        <dt>Happened</dt><dd>We agreed "four or more digits or a decimal point" in the abstract. Shortly afterwards, writing the literals script showed that <code>$1250.75</code> does not even arrive as one number.</dd>
+        <dt>Cost</dt><dd>None yet. But decision record 0007 and the user-facing page state a rule that has never run against a script.</dd>
+        <dt>Instead</dt><dd>Mark 0007 as proposed until milestone 2 has run it against script 37.</dd>
+      </dl>
+    </article>
+    <article>
+      <h3>5. Keep each fact in one place</h3>
+      <dl>
+        <dt>Happened</dt><dd>The list of checks lived in three documents. I added the structure check to one and missed the other two.</dd>
+        <dt>Cost</dt><dd>Pull request #1 the next day.</dd>
+        <dt>Instead</dt><dd>State the checks once and link to that place. They are still listed in three files today.</dd>
+      </dl>
+    </article>
+    <article>
+      <h3>6. Check access first, and commit in reviewable pieces</h3>
+      <dl>
+        <dt>Happened</dt><dd>I learned that I could not create a repo only after you had confirmed everything. Milestone 0 then went to <code>main</code> as one commit of 81 files.</dd>
+        <dt>Cost</dt><dd>A detour through GitHub app settings, and decisions, scripts and code that you could not review separately.</dd>
+        <dt>Instead</dt><dd>Check repo access during round 1, and open separate pull requests for the documents, the scripts and the code.</dd>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2>What is not verified</h2>
+  <ul class="plain">
+    <li><b>The new scripts have never run on SQL Server or Hive.</b> I wrote the 21 new scripts to be valid, but they were only tokenized. A syntax error in one would not have been caught.</li>
+    <li><b>No real script of yours has been through anything.</b> Everything so far ran on invented samples.</li>
+    <li><b>Formatting is untested on the scripts.</b> The allow-list in decision record 0005 comes from individual probes, not from a run over all 49.</li>
+    <li><b>The keep-list does not exist.</b> It is the largest piece of milestone 1. Without it, words like <code>OPEN</code> and <code>WHILE</code> get fake names.</li>
+    <li><b>The round-trip result is from throwaway code.</b> The repo contains nothing that obfuscates.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Where this leaves the plan</h2>
+  <ol class="track">
+    <li class="done"><span class="n">0 · done</span><b>Foundation</b>Decisions, scripts, word lists, CI.</li>
+    <li class="next"><span class="n">1 · on hold</span><b>Core CLI, T-SQL</b>Engine, workspace, keep-list, three checks.</li>
+    <li><span class="n">2</span><b>Hive and lists</b>Hive, ban-list, number obfuscation, shared workspaces.</li>
+    <li><span class="n">3</span><b>LLM loop</b>Bundle, task mapping, response reports.</li>
+    <li><span class="n">4</span><b>Procedure formatting</b>Format queries inside procedure bodies.</li>
+    <li><span class="n">5</span><b>Web UI</b>FastAPI backend, React and Vite frontend.</li>
+    <li><span class="n">6</span><b>LLM connection</b>Direct API calls, notes, diagrams.</li>
+    <li><span class="n">7</span><b>Team use</b>Central server, multi-user, auto-update.</li>
+    <li class="parked"><span class="n">parked</span><b>Local analysis</b>"Who uses this table?", similar code.</li>
+  </ol>
+  <p>Milestone 1 starts when you say so. It ends with its tests passing and a short note from you after running it on real scripts: pass and fail counts and the construct that failed, never a script.</p>
+</section>
+
+<footer>Written by Claude on 13 October 2026 as the record of milestone 0. Kept in the repo at <code>docs/history/milestone-0.html</code>.</footer>
+
+</main>
+</body>
+</html>
