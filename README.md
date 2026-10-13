@@ -32,16 +32,14 @@ becomes `Customers` again, in SQL and in prose alike.
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph machine["Your machine: workspace (.obf)"]
-        direction LR
         O["Original script"] -->|format| F["Formatted script"]
         F -->|obfuscate| X["Obfuscated script"]
         X -->|records each replacement| M[("Mapping<br/>the secret")]
         M -->|restores real names| D["Deobfuscated response"]
     end
     subgraph provider["LLM provider"]
-        direction TB
         W["Works on the<br/>obfuscated script"] -->|answers| R["Response"]
     end
     X ==>|bundle| W
