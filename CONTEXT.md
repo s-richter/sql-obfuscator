@@ -87,3 +87,7 @@ Any name or protected value from an original script that is present in something
 
 **Round-trip**:
 Obfuscating a formatted script and immediately deobfuscating it; it passes when the result equals the formatted script.
+
+**Structure check**:
+The comparison that passes when an obfuscated script has the same sequence of token types as its formatted script, showing that only names and values changed.
+_Avoid_: Shape check, token check

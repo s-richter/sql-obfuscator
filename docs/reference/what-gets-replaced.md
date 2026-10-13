@@ -152,11 +152,14 @@ does not try to prevent that.
 Every time a script is obfuscated, the tool checks that
 
 1. deobfuscating the result gives back the formatted script exactly,
-2. no name or protected value from the original is left in the result, and
-3. nothing on the ban-list appears in the result.
+2. no name or protected value from the original is left in the result,
+3. the result has the same structure as the formatted script: the same kinds of tokens in
+   the same order, so nothing was added, dropped or merged, and
+4. nothing on the ban-list appears in the result (from milestone 2).
 
 If any check fails, no obfuscated script is written. There is no option to override this.
 
-The task text you write for the LLM goes through the same replacement and the same checks.
+The task text you write for the LLM goes through the same replacement, and through the
+leak and ban-list checks.
 The tool cannot catch a sensitive word that appears in no script and is not on the
 ban-list, so read the bundle preview before you send it.
