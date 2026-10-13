@@ -61,4 +61,5 @@ uv run ruff format --check
 - [docs/adr/](docs/adr/): why the design is the way it is. Read 0001 before touching the engine.
 - [docs/reference/what-gets-replaced.md](docs/reference/what-gets-replaced.md): the user-facing rules.
 - [docs/milestones.md](docs/milestones.md): the plan.
+- [docs/history/](docs/history/): one self-contained HTML page per finished milestone: what was done, the evidence, and what we would do differently. Open the file in a browser.
 - [tests/scripts/](tests/scripts/README.md): the SQL test scripts.
