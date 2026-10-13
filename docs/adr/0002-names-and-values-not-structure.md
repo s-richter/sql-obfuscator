@@ -9,4 +9,4 @@ The guarantee is that no name or protected value reaches the LLM. Statement stru
 
 - Numbers are kept by default because most are structural (`TOP 10`, `VARCHAR(100)`, `ORDER BY 1`); strings are replaced by default.
 - Everything else shown to an LLM (the task text, user notes) is subject to the same guarantee and must pass through the mapping and the ban-list.
-- Every obfuscation runs the round-trip, leak and ban-list checks itself. If one fails, no obfuscated script is written and there is deliberately no flag to override that.
+- Every obfuscation runs four checks itself: round-trip, leak, structure (the obfuscated script has the same sequence of token types as the formatted script) and ban-list. If one fails, no obfuscated script is written and there is deliberately no flag to override that.
