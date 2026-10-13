@@ -20,7 +20,8 @@ never a script.
 
 - Which LLM providers to support: milestone 6.
 - Web UI details: milestone 5.
-- Scientific-notation, hexadecimal and money values under number obfuscation: milestone 2.
+- The number rule (decision record 0007) is proposed until milestone 2 has tested it on the
+  literals scripts. Scientific-notation, hexadecimal and money values are settled then too.
 - Multi-user and auto-update details: milestone 7. Originals come from files only, never
   from a live database; multi-user means a central server holding workspaces.
 

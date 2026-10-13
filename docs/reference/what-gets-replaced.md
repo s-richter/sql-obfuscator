@@ -72,6 +72,9 @@ switch number obfuscation on with `--numbers obfuscate` (available from mileston
 
 ### The rule when number obfuscation is on
 
+> **Proposed, not final.** This rule has been agreed but not yet tried on scripts.
+> Milestone 2 will test it and may adjust it; this page changes together with the rule.
+
 A number is **replaced** if it
 
 - has four or more digits, or
