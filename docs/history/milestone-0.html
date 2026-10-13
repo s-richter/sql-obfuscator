@@ -167,7 +167,7 @@ footer { color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--ru
     <thead><tr><th>Part</th><th>Where</th><th>What it is</th></tr></thead>
     <tbody>
       <tr><td>Glossary</td><td><code>CONTEXT.md</code></td><td>21 terms. "Original", "formatted", "obfuscated" and "deobfuscated" script; engine, name, fake name, placeholder, mapping, keep-list, ban-list, workspace, bundle and more.</td></tr>
-      <tr><td>Decision records</td><td><code>docs/adr/</code></td><td>Seven decisions with the alternatives that were rejected and why.</td></tr>
+      <tr><td>Decision records</td><td><code>docs/adr/</code></td><td>Seven decisions with the alternatives that were rejected and why. Six are accepted; the number rule is proposed.</td></tr>
       <tr><td>User-facing rules</td><td><code>docs/reference/what-gets-replaced.md</code></td><td>Exactly what an obfuscated script hides and what it still shows, including the number rule and its limits.</td></tr>
       <tr><td>Plan</td><td><code>docs/milestones.md</code></td><td>Eight milestones, what is decided later on purpose, and the four checks.</td></tr>
       <tr><td>Test scripts</td><td><code>tests/scripts/</code></td><td>49 scripts, 10,240 lines: 28 from the earlier tool and 21 new ones (15 T-SQL, 6 Hive).</td></tr>
@@ -328,7 +328,7 @@ SELECT a FROM secret_table</div>
       <tr><td class="num">0004</td><td>The stored mapping is the source of truth and only grows.</td><td>Names stay stable when originals change, which auto-update needs.</td></tr>
       <tr><td class="num">0005</td><td>Formatting is best-effort and limited to safe statement types.</td><td>An allow-list is the only gate that stops silent rewrites.</td></tr>
       <tr><td class="num">0006</td><td>Five commands, independent flags, no safety switches.</td><td>The earlier tool became too complicated to use.</td></tr>
-      <tr><td class="num">0007</td><td>Numbers are replaced by size, not by position.</td><td>Tokens cannot tell a threshold from a row limit.</td></tr>
+      <tr><td class="num">0007</td><td>Numbers are replaced by size, not by position. <em>Proposed since 13 October, until milestone 2 has tested it.</em></td><td>Tokens cannot tell a threshold from a row limit.</td></tr>
     </tbody>
   </table>
   </div>
@@ -386,6 +386,7 @@ SELECT a FROM secret_table</div>
         <dt>Happened</dt><dd>We agreed "four or more digits or a decimal point" in the abstract. Shortly afterwards, writing the literals script showed that <code>$1250.75</code> does not even arrive as one number.</dd>
         <dt>Cost</dt><dd>None yet. But decision record 0007 and the user-facing page state a rule that has never run against a script.</dd>
         <dt>Instead</dt><dd>Mark 0007 as proposed until milestone 2 has run it against script 37.</dd>
+        <dt>Since</dt><dd>Done on 13 October in pull request <a href="https://github.com/s-richter/sql-obfuscator/pull/3">#3</a>: 0007 is now proposed.</dd>
       </dl>
     </article>
     <article>
