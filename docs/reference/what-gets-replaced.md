@@ -29,7 +29,8 @@ and an animal, for example `frozen_lion`.
   the same table.
 - **One name, one fake name.** A table and a column that are both called `Status` get the
   same fake name. `Customers` and `CUSTOMERS` are the same name; the fake name follows the
-  casing (`Frozen_Lion`, `FROZEN_LION`).
+  casing: all upper case gives `FROZEN_LION`, all lower case gives `frozen_lion`, and any
+  other mix (`Customers`, `customerId`, `Customer_ID`) gives `Frozen_Lion`.
 - **Sigils and quoting stay.** `@CustomerId` becomes `@Gentle_Otter`, `#Recent` becomes
   `#Calm_Lynx`, `[Customer Name]` becomes `[Brisk_Moth]`.
 - **Kept by default:** SQL keywords, built-in functions, data types, hints, and the system
@@ -38,6 +39,10 @@ and an animal, for example `frozen_lion`.
 - **Unknown words are replaced.** If the tool does not recognise a built-in function, it
   gives it a fake name and lists it in the report. That is confusing for the LLM but never
   a leak; add the word to `keep.txt` to fix it.
+- **Known limit: unquoted names that are also keywords stay visible.** A column called
+  `Date`, `Comment` or `Format` is read as the keyword, not as a name, so it is kept and
+  the leak check cannot catch it (it only knows the names the tool recognised). The report
+  lists every such word. Write the name in brackets (`[Date]`) if it must be hidden.
 
 ## Strings
 
@@ -58,8 +63,8 @@ Things to know:
 - Dates written as strings (`'2024-01-01'`) are replaced like any other string.
 - SQL that is built inside strings (dynamic SQL) is replaced as a whole. It cannot leak,
   but the LLM cannot read it either.
-- Short flags such as `'Y'` and `'N'` are replaced. Add them to `keep.txt` if the LLM
-  should see them.
+- Short flags such as `'Y'` and `'N'` are replaced, and so are strings made only of
+  digits such as `'2024'` and `'1'`. Add them to `keep.txt` if the LLM should see them.
 
 ## Numbers
 
@@ -161,6 +166,10 @@ Every time a script is obfuscated, the tool checks that
 4. nothing on the ban-list appears in the result (from milestone 2).
 
 If any check fails, no obfuscated script is written. There is no option to override this.
+
+The checks know only what the tool recognised as a name or value. A name the tool took for
+a keyword (see the known limit under Names) is outside their reach; the report is the
+place to look for those.
 
 The task text you write for the LLM goes through the same replacement, and through the
 leak and ban-list checks.
