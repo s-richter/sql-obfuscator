@@ -9,4 +9,5 @@ Only plain statements (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE 
 
 - A formatted script can be partly unformatted; that is expected, not a bug.
 - Formatting queries inside procedure bodies is a planned milestone (split the body, format the plain statements inside). Writing our own formatter for procedural code is ruled out.
-- Formatting changes more than whitespace (`INT` becomes `INTEGER`, `Total = SUM(x)` becomes `SUM(x) AS Total`); this is accepted.
+- Formatting changes more than whitespace (`INT` becomes `INTEGER`, `Total = SUM(x)` becomes `SUM(x) AS Total`, a `--` comment becomes a `/* */` comment at the end of its line); this is accepted.
+- A script is cut into chunks at `GO` and at top-level semicolons. A chunk is formatted only if sqlglot parses it as exactly one statement of an allowed type without a warning. A chunk that holds several statements without semicolons therefore stays as written and is listed in the report.

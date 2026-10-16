@@ -7,9 +7,9 @@ never a script.
 | # | Milestone | Contents | Status |
 |---|---|---|---|
 | 0 | Foundation | Repo, CI, glossary and decision records, word lists, test scripts. | Done |
-| 1 | Core CLI, T-SQL | `format`, `obfuscate`, `deobfuscate`, `map`; workspace; keep-list; round-trip, leak and structure checks. | Next |
+| 1 | Core CLI, T-SQL | `format`, `obfuscate`, `deobfuscate`, `map`; workspace with one script; keep-list; report; round-trip, leak and structure checks; deobfuscating SQL and plain text. | Next |
 | 2 | Hive and lists | Hive dialect, ban-list, user keep-list, number obfuscation, several scripts sharing one workspace. | Planned |
-| 3 | LLM loop | `bundle`, task mapping, response handling and reports; deobfuscating Markdown, HTML and Mermaid. | Planned |
+| 3 | LLM loop | `bundle`, task mapping, response handling and response reports; deobfuscating Markdown (including escaped underscores such as `frozen\_lion`), HTML and Mermaid. | Planned |
 | 4 | Procedure formatting | Format the queries inside procedure bodies. | Planned |
 | 5 | Web UI | FastAPI backend and React + Vite frontend, running locally. | Planned |
 | 6 | LLM connection | Direct, provider-agnostic API calls; user notes on tables and columns; diagrams. | Planned |
@@ -24,6 +24,9 @@ never a script.
   literals scripts. Scientific-notation, hexadecimal and money values are settled then too.
 - Multi-user and auto-update details: milestone 7. Originals come from files only, never
   from a live database; multi-user means a central server holding workspaces.
+- Whether to recognise keyword-shaped column names such as `Date` by their position: not
+  before a real script shows the need. Until then they stay visible and the report lists
+  them (see the known limit in `docs/reference/what-gets-replaced.md`).
 
 ## Checks every obfuscation must pass
 
