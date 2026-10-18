@@ -4,7 +4,7 @@ import pytest
 import sqlglot
 from sqlglot.tokens import TokenType
 
-from sql_obfuscator.tokens import Dialect, tokenize
+from sql_obfuscator.tokens import Dialect, source_text, tokenize
 
 SWALLOWING_STATEMENTS = [
     (Dialect.TSQL, "GO\nSELECT a FROM secret_table"),
@@ -52,3 +52,43 @@ def test_comment_like_text_in_a_string_stays_a_string():
     tokens = tokenize("SELECT '-- not a comment' FROM t", Dialect.TSQL)
     assert tokens[1].token_type == TokenType.STRING
     assert tokens[1].text == "-- not a comment"
+
+
+def test_hive_decodes_string_escapes_but_preserves_the_raw_source_span():
+    sql = r"SELECT 'a\tb', 'atb'"
+
+    tokens = tokenize(sql, Dialect.HIVE)
+
+    assert tokens[1].text == "a\tb"
+    assert tokens[3].text == "atb"
+    assert source_text(sql, tokens[1]) == r"'a\tb'"
+    assert source_text(sql, tokens[3]) == "'atb'"
+
+
+def test_tsql_does_not_decode_hive_style_string_escapes():
+    sql = r"SELECT 'a\tb'"
+
+    token = tokenize(sql, Dialect.TSQL)[1]
+
+    assert token.text == r"a\tb"
+    assert source_text(sql, token) == r"'a\tb'"
+
+
+def test_hive_identifier_can_start_with_digits():
+    tokens = tokenize("SELECT 123secret FROM records", Dialect.HIVE)
+
+    assert [(token.token_type, token.text) for token in tokens] == [
+        (TokenType.SELECT, "SELECT"),
+        (TokenType.VAR, "123secret"),
+        (TokenType.FROM, "FROM"),
+        (TokenType.VAR, "records"),
+    ]
+
+
+def test_tsql_splits_a_digit_prefixed_name():
+    tokens = tokenize("SELECT 123secret FROM records", Dialect.TSQL)
+
+    assert [(token.token_type, token.text) for token in tokens[1:3]] == [
+        (TokenType.NUMBER, "123"),
+        (TokenType.VAR, "secret"),
+    ]

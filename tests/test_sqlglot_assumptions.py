@@ -12,7 +12,7 @@ from sqlglot import exp
 from sqlglot.errors import ParseError
 from sqlglot.tokens import TokenType
 
-from sql_obfuscator.tokens import Dialect, tokenize
+from sql_obfuscator.tokens import Dialect, source_text, tokenize
 
 
 def _format(sql: str) -> str:
@@ -63,10 +63,40 @@ def test_parser_silently_rewrites_some_statements_into_invalid_sql(sql: str, cor
 
 
 def test_formatting_changes_more_than_whitespace():
-    """ADR 0005: accepted differences between an original and a formatted script."""
+    """ADR 0005: type-position INT normalization is allowed; alias rewrites need a new rule."""
     assert _format("SELECT CAST(a AS INT), Total = SUM(b) FROM t") == (
         "SELECT CAST(a AS INTEGER), SUM(b) AS Total FROM t"
     )
+
+
+def test_create_table_ntext_is_silently_rewritten_to_varchar_max(caplog):
+    """ADR 0005: even one allowed statement can undergo a structural type rewrite."""
+    sql = "CREATE TABLE dbo.Documents (Body NTEXT)"
+
+    with caplog.at_level(logging.WARNING, logger="sqlglot"):
+        trees = sqlglot.parse(sql, read="tsql")
+        emitted = "; ".join(tree.sql(dialect="tsql") for tree in trees if tree)
+
+    assert len(trees) == 1
+    assert isinstance(trees[0], exp.Create)
+    assert trees[0].args["kind"] == "TABLE"
+    assert not caplog.records
+    assert emitted == "CREATE TABLE dbo.Documents (Body VARCHAR(MAX))"
+    assert sqlglot.parse_one(emitted, read="tsql") != trees[0]
+
+
+def test_ntext_and_text_have_equal_asts_and_token_type_sequences():
+    """ADR 0005: raw token spelling distinguishes types that the AST does not."""
+    ntext = "CREATE TABLE t (c NTEXT)"
+    text = "CREATE TABLE t (c TEXT)"
+
+    assert sqlglot.parse_one(ntext, read="tsql") == sqlglot.parse_one(text, read="tsql")
+    assert [token.token_type for token in tokenize(ntext, Dialect.TSQL)] == [
+        token.token_type for token in tokenize(text, Dialect.TSQL)
+    ]
+    assert [source_text(ntext, token) for token in tokenize(ntext, Dialect.TSQL)] != [
+        source_text(text, token) for token in tokenize(text, Dialect.TSQL)
+    ]
 
 
 def test_hive_hint_is_a_single_token_that_hides_a_name():
