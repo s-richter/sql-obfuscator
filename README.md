@@ -138,7 +138,7 @@ so later commands need no flags.
 |---|---|---|
 | 0 | Foundation: decisions, test scripts, word lists, CI | Done |
 | 1 | Core command line for T-SQL | Next |
-| 2 | Hive, ban-list, keep-list, number obfuscation, several scripts per workspace | Planned |
+| 2 | Hive, ban-list, number obfuscation, several scripts per workspace | Planned |
 | 3 | The LLM loop: bundle and response handling | Planned |
 | 4 | Formatting inside procedure bodies | Planned |
 | 5 | Web UI (FastAPI, React and Vite) | Planned |

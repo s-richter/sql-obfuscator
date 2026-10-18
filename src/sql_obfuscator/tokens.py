@@ -35,7 +35,7 @@ def _tokenizer_class(dialect: Dialect) -> type:
 
 def tokenize(sql: str, dialect: Dialect) -> list[Token]:
     """Split a script into tokens, never swallowing the rest of a statement."""
-    return _tokenizer_class(dialect)().tokenize(sql)
+    return _tokenizer_class(dialect)(dialect=dialect.value).tokenize(sql)
 
 
 def source_text(sql: str, token: Token) -> str:

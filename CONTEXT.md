@@ -11,7 +11,7 @@ A SQL script exactly as the user supplied it, including poor formatting, comment
 _Avoid_: Input script, source script
 
 **Formatted script**:
-The original script after pretty-printing, with nothing renamed yet.
+The original script after pretty-printing and with every name in one spelling, nothing renamed yet.
 _Avoid_: Input script, normalized script, prettified script
 
 **Obfuscated script**:
@@ -89,5 +89,5 @@ Any name or protected value from an original script that is present in something
 Obfuscating a formatted script and immediately deobfuscating it; it passes when the result equals the formatted script.
 
 **Structure check**:
-The comparison that passes when an obfuscated script has the same sequence of token types as its formatted script, showing that only names and values changed.
+The comparison that passes when an obfuscated script has the same sequence of token types as its formatted script, counting every renamed word as a name token, showing that only names and values changed.
 _Avoid_: Shape check, token check

@@ -27,10 +27,13 @@ and an animal, for example `frozen_lion`.
 - **Qualified names** are replaced part by part. `SalesDB.dbo.Customers` becomes something
   like `quiet_heron.dbo.frozen_lion`, so `Customers` and `dbo.Customers` stay recognisably
   the same table.
-- **One name, one fake name.** A table and a column that are both called `Status` get the
-  same fake name. `Customers` and `CUSTOMERS` are the same name; the fake name follows the
-  casing: all upper case gives `FROZEN_LION`, all lower case gives `frozen_lion`, and any
-  other mix (`Customers`, `customerId`, `Customer_ID`) gives `Frozen_Lion`.
+- **One name, one fake name, one spelling.** A table and a column that are both called
+  `Status` get the same fake name. `Customers`, `CUSTOMERS` and `customers` are the same
+  name. The formatted script writes every occurrence of a name the way it was spelled where
+  the workspace first saw it, so `CustomerId` and `customerId` both appear as `CustomerId`.
+  The fake name follows that spelling: all upper case gives `FROZEN_LION`, all lower case
+  gives `frozen_lion`, and any other mix (`Customers`, `customerId`, `Customer_ID`) gives
+  `Frozen_Lion`.
 - **Sigils and quoting stay.** `@CustomerId` becomes `@Gentle_Otter`, `#Recent` becomes
   `#Calm_Lynx`, `[Customer Name]` becomes `[Brisk_Moth]`.
 - **Kept by default:** SQL keywords, built-in functions, data types, hints, and the system
@@ -39,10 +42,11 @@ and an animal, for example `frozen_lion`.
 - **Unknown words are replaced.** If the tool does not recognise a built-in function, it
   gives it a fake name and lists it in the report. That is confusing for the LLM but never
   a leak; add the word to `keep.txt` to fix it.
-- **Known limit: unquoted names that are also keywords stay visible.** A column called
-  `Date`, `Comment` or `Format` is read as the keyword, not as a name, so it is kept and
-  the leak check cannot catch it (it only knows the names the tool recognised). The report
-  lists every such word. Write the name in brackets (`[Date]`) if it must be hidden.
+- **Names that look like keywords are still names.** A column called `Date`, `Comment` or
+  `Format` is replaced like any other name, while `DATE` as a data type (`CAST(x AS DATE)`)
+  and `FORMAT(...)` as a function are kept. The tool decides by position with a small set
+  of rules. Where no rule applies, the word is replaced: that can hide a harmless type word
+  from the LLM, which is confusing but never a leak, and the report lists every such word.
 
 ## Strings
 
@@ -133,6 +137,27 @@ These are settled when milestone 2 is built, and this page will be updated then:
 - hexadecimal and binary values (`0x1F`)
 - money values with a currency sign (`$100`)
 
+## Formatting
+
+The formatted script is the original with its layout tidied. Plain statements (`SELECT`,
+`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE TABLE`, `CREATE VIEW`, `CREATE INDEX`) are
+pretty-printed; procedural code is left as written. Every pretty-printed statement is
+compared token by token with the original, and only these differences are allowed:
+
+- whitespace and line breaks
+- the letter case of keywords, built-in functions and data types
+- `INT` written as `INTEGER`, `DECIMAL` as `NUMERIC`
+- `AS` added before an alias, and a column in a subquery or CTE given an alias equal to
+  its own name (`UserId AS UserId`)
+- a `--` comment written as a `/* */` comment at the end of its line
+
+Any other difference means the statement is left as written and listed in the report. A
+`Total = SUM(x)` column is such a case today: it would become `SUM(x) AS Total`, so the
+statement stays unformatted until a rule for it exists.
+
+Independently of pretty-printing, every name is written in one spelling throughout the
+script (see Names), in formatted and unformatted statements alike.
+
 ## Comments
 
 Comments often describe exactly what the names hide, so they never reach the LLM as
@@ -140,7 +165,9 @@ written. By default each comment is replaced by a marker such as `/* c12 */` and
 when the response is deobfuscated. The LLM is told to leave the markers where they are; a
 marker that goes missing is listed in the response report.
 
-- `--comments strip` removes comments completely. They are then not restored.
+- `--comments strip` removes comments from the formatted script as well as from the
+  obfuscated one. They are not restored; the copy of the original in the workspace still
+  has them.
 - `--comments keep` leaves them in. The leak check and the ban-list still apply to them.
 
 ## What stays visible
@@ -167,9 +194,10 @@ Every time a script is obfuscated, the tool checks that
 
 If any check fails, no obfuscated script is written. There is no option to override this.
 
-The checks know only what the tool recognised as a name or value. A name the tool took for
-a keyword (see the known limit under Names) is outside their reach; the report is the
-place to look for those.
+The leak check covers every word the tool treated as a name, including names that look
+like keywords. It cannot cover words the tool kept on purpose: built-in functions, type
+words in a type position, and `keep.txt` entries. Only add a word to `keep.txt` if it is
+harmless everywhere in your scripts.
 
 The task text you write for the LLM goes through the same replacement, and through the
 leak and ban-list checks.
