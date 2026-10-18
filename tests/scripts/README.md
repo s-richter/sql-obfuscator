@@ -7,7 +7,7 @@ endings (see `.gitattributes`).
 Scripts 01 to 28 come from the earlier version of this tool. Scripts 30 and up were written
 for this one, each aimed at a construct the earlier scripts do not cover.
 
-## T-SQL (34 scripts)
+## T-SQL (35 scripts)
 
 | Script | Lines | Source | Covers |
 |---|---|---|---|
@@ -45,6 +45,7 @@ for this one, each aimed at a construct the earlier scripts do not cover.
 | `42_tsql_ddl.sql` | 44 | new | Schema, table with constraints and computed column, filtered index, `ALTER`, view, `GRANT`/`DENY`. |
 | `43_tsql_windows_line_endings.sql` | 6 | new | CRLF line endings, including inside a string. |
 | `44_tsql_unicode_with_bom.sql` | 3 | new | UTF-8 byte order mark; non-ASCII names, strings and comment. |
+| `45_tsql_keyword_shaped_names.sql` | 30 | new | Columns called `Date`, `Comment` and `Format`, which the tokenizer types as keywords, next to the type `DATE`, the function `FORMAT`, the same words as aliases, and `[Date]` in brackets. |
 
 ## Hive (15 scripts)
 
@@ -82,6 +83,8 @@ the milestone named.
 | A file can start with a byte order mark and use CRLF line endings; both must survive a round-trip. | 43, 44 | 1 |
 | A money value such as `$1250.75` is tokenized as a name `$1250`, a dot and a number `75`. | 37 | 1 |
 | `$action` and the `inserted`/`deleted` tables are tokenized as ordinary names and belong on the keep-list. | 33, 36 | 1 |
+| A column called `Date`, `Comment` or `Format` is tokenized as a keyword, not a name. Kept because of its token type, it would leak (decision record 0009). | 45 | 1 |
+| `CustomerId` and `customerId` are one name with two spellings; a fake name cannot carry both, so the formatted script uses one spelling per name (decision record 0009). | 31 | 1 |
 | A Hive hint such as `/*+ MAPJOIN(b) */` is one token. A name inside it would not be replaced unless the hint is tokenized separately. This would be a leak. | 54 | 2 |
 | Hive numeric suffixes (`100L`, `10Y`, `3.14BD`) produce extra tokens that overlap the number in the source text. | 55 | 2 |
 | Hive `SET` keys and `ADD JAR` paths are tokenized as names, so they are replaced unless handled specially. | 53 | 2 |

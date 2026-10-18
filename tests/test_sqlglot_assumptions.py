@@ -63,14 +63,26 @@ def test_parser_silently_rewrites_some_statements_into_invalid_sql(sql: str, cor
 
 
 def test_formatting_changes_more_than_whitespace():
-    """ADR 0005: type-position INT normalization is allowed; alias rewrites need a new rule."""
+    """ADR 0009: `INT` to `INTEGER` is permitted; the `Total = SUM(b)` rewrite is not."""
     assert _format("SELECT CAST(a AS INT), Total = SUM(b) FROM t") == (
         "SELECT CAST(a AS INTEGER), SUM(b) AS Total FROM t"
     )
 
 
+def test_formatting_adds_aliases_and_writes_decimal_as_numeric():
+    """ADR 0009: permitted differences the token comparison must allow for."""
+    assert _format(
+        "WITH c AS (SELECT a.x, CAST(a.y AS DECIMAL(18, 2)) t FROM a) SELECT x FROM c"
+    ) == ("WITH c AS (SELECT a.x AS x, CAST(a.y AS NUMERIC(18, 2)) AS t FROM a) SELECT x FROM c")
+
+
+def test_formatting_turns_line_comments_into_block_comments():
+    """ADR 0009: comments survive formatting but change syntax and position."""
+    assert _format("SELECT a, -- about a\n b FROM t") == "SELECT a /* about a */, b FROM t"
+
+
 def test_create_table_ntext_is_silently_rewritten_to_varchar_max(caplog):
-    """ADR 0005: even one allowed statement can undergo a structural type rewrite."""
+    """ADR 0009: an allowed statement with no warning can still change a type."""
     sql = "CREATE TABLE dbo.Documents (Body NTEXT)"
 
     with caplog.at_level(logging.WARNING, logger="sqlglot"):
@@ -86,7 +98,7 @@ def test_create_table_ntext_is_silently_rewritten_to_varchar_max(caplog):
 
 
 def test_ntext_and_text_have_equal_asts_and_token_type_sequences():
-    """ADR 0005: raw token spelling distinguishes types that the AST does not."""
+    """ADR 0009: only the source text of the tokens tells `NTEXT` from `TEXT`."""
     ntext = "CREATE TABLE t (c NTEXT)"
     text = "CREATE TABLE t (c TEXT)"
 

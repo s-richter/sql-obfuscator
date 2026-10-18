@@ -24,6 +24,7 @@ report.obf/
 
 - `settings.json` is written by the first `obfuscate` from its flags (`--dialect`, `--seed`, `--strings`, `--comments`). A later `obfuscate` that passes a different value is an error that names the stored value. Settings are never changed in place, because the mapping was built under them.
 - `keep.txt` holds names, strings and numbers, one per line, compared case-insensitively. Blank lines are ignored.
+- With `--comments strip`, the comments are removed from `formatted.sql` itself, so the round-trip still compares against it; `original.sql` keeps them (decision record 0009).
 - In milestone 1 a workspace holds one script. Several scripts sharing one mapping is milestone 2 and adds folders under `scripts/`; nothing else changes.
 - Running `obfuscate` again on a changed script overwrites that script's four files. The mapping only grows (decision record 0004).
 - `report.txt` is plain text in milestone 1 and lists the statements left unformatted, the renamed words that might be built-ins, and the unquoted names that were kept because they read as keywords. Milestone 3 adds the response side.

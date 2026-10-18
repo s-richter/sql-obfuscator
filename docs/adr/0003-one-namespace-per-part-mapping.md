@@ -14,3 +14,4 @@ Each part of a qualified name is mapped on its own, so `Customers`, `dbo.Custome
 
 - `dbo`, `sys` and `INFORMATION_SCHEMA` are on the keep-list by default.
 - A stored mapping depends on this rule; changing it later invalidates existing mappings.
+- Within a workspace a name has one spelling, the one seen first, and the formatted script is written in it (decision record 0009).
